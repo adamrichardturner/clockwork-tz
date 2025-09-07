@@ -1,6 +1,6 @@
 {
   "name": "clockwork-tz",
-  "version": "0.1.0",
+  "version": "1.0.0-alpha.1",
   "description": "Accurate timezone conversions and DST handling with optional deterministic IANA tzdb support",
   "type": "module",
   "sideEffects": false,
@@ -12,6 +12,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./browser": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.browser.js"
     }
   },
   "files": [
