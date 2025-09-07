@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clockwork-TZ Browser Example</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        color: #333;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+
+      .header {
+        text-align: center;
+        color: white;
+        margin-bottom: 3rem;
+      }
+
+      .header h1 {
+        font-size: 3rem;
+        margin-bottom: 0.5rem;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+      }
+
+      .header p {
+        font-size: 1.2rem;
+        opacity: 0.9;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+        gap: 2rem;
+        margin-bottom: 2rem;
+      }
+
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        transition: transform 0.3s ease;
+      }
+
+      .card:hover {
+        transform: translateY(-5px);
+      }
+
+      .card h2 {
+        color: #667eea;
+        margin-bottom: 1rem;
+        font-size: 1.5rem;
+      }
+
+      .clock-grid {
+        display: grid;
+        gap: 0.8rem;
+      }
+
+      .clock-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.8rem;
+        background: #f8f9ff;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+      }
+
+      .clock-zone {
+        font-weight: 600;
+        color: #333;
+      }
+
+      .clock-time {
+        font-family: 'Monaco', 'Menlo', monospace;
+        font-size: 1rem;
+        color: #667eea;
+      }
+
+      .controls {
+        background: white;
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        margin-bottom: 2rem;
+      }
+
+      .controls h2 {
+        color: #667eea;
+        margin-bottom: 1rem;
+      }
+
+      .form-group {
+        margin-bottom: 1rem;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: #333;
+      }
+
+      select,
+      input,
+      button {
+        width: 100%;
+        padding: 0.8rem;
+        border: 2px solid #e1e5e9;
+        border-radius: 8px;
+        font-size: 1rem;
+        transition: border-color 0.3s ease;
+      }
+
+      select:focus,
+      input:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      button {
+        background: #667eea;
+        color: white;
+        border: none;
+        cursor: pointer;
+        font-weight: 600;
+        margin-top: 0.5rem;
+        transition: background 0.3s ease;
+      }
+
+      button:hover {
+        background: #5a67d8;
+      }
+
+      .conversion-result {
+        background: #f0fff4;
+        border: 2px solid #68d391;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1rem;
+      }
+
+      .error {
+        background: #fed7d7;
+        border: 2px solid #fc8181;
+        color: #c53030;
+      }
+
+      .status {
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+      }
+
+      .status-item {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+      }
+
+      .footer {
+        text-align: center;
+        color: white;
+        margin-top: 2rem;
+        opacity: 0.8;
+      }
+
+      @media (max-width: 768px) {
+        .header h1 {
+          font-size: 2rem;
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .container {
+          padding: 1rem;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>Clockwork-TZ</h1>
+        <p>Production-ready timezone management in the browser</p>
+      </div>
+
+      <div class="status">
+        <h3>Library Status</h3>
+        <div class="status-item">
+          <span>Engine:</span>
+          <span id="engine-status">Loading...</span>
+        </div>
+        <div class="status-item">
+          <span>TZDB Version:</span>
+          <span id="tzdb-status">Loading...</span>
+        </div>
+        <div class="status-item">
+          <span>User Timezone:</span>
+          <span id="user-timezone">Loading...</span>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h2>World Clock</h2>
+          <div id="world-clock" class="clock-grid">
+            <!-- Clock items will be populated by JavaScript -->
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Timezone Converter</h2>
+          <div class="form-group">
+            <label for="source-time">Time:</label>
+            <input type="datetime-local" id="source-time" value="2024-07-15T14:00" />
+          </div>
+          <div class="form-group">
+            <label for="from-zone">From Timezone:</label>
+            <select id="from-zone">
+              <!-- Options will be populated by JavaScript -->
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="to-zone">To Timezone:</label>
+            <select id="to-zone">
+              <!-- Options will be populated by JavaScript -->
+            </select>
+          </div>
+          <button onclick="convertTimezone()">Convert</button>
+          <div id="conversion-result"></div>
+        </div>
+
+        <div class="card">
+          <h2>Timezone List</h2>
+          <div class="form-group">
+            <label for="label-style">Label Style:</label>
+            <select id="label-style" onchange="updateTimezoneList()">
+              <option value="original">Original</option>
+              <option value="offset">With Offset</option>
+              <option value="abbrev">With Abbreviation</option>
+              <option value="altName">With Alternative Name</option>
+            </select>
+          </div>
+          <div id="timezone-list" style="max-height: 300px; overflow-y: auto">
+            <!-- Timezone list will be populated by JavaScript -->
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Real-time Features</h2>
+          <button onclick="toggleClock()">
+            <span id="clock-toggle-text">Start Real-time Clock</span>
+          </button>
+          <button onclick="toggleTransitionWatch()">
+            <span id="transition-toggle-text">Watch DST Transitions</span>
+          </button>
+          <div id="realtime-status" style="margin-top: 1rem; font-size: 0.9rem; color: #666">
+            Click buttons to start real-time features
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <p>
+          Built with clockwork-tz •
+          <a href="https://github.com/adamturner/clockwork-tz" style="color: white"
+            >View on GitHub</a
+          >
+        </p>
+      </div>
+    </div>
+
+    <script type="module">
+      // Import clockwork-tz (assuming it's built and available)
+      // In a real deployment, you'd import from a CDN or local build
+      import {
+        initClockworkTZ,
+        fromUTC,
+        convert,
+        format,
+        listTimeZones,
+        onTick,
+        watchZoneTransitions,
+        getStatus,
+        getUserTimeZone,
+        FORMAT_PATTERNS,
+      } from '../dist/index.js'
+
+      // Global state
+      let clockInterval = null
+      let transitionWatchers = []
+      let isClockRunning = false
+      let isWatchingTransitions = false
+
+      // Initialize the library
+      console.log('Initializing clockwork-tz...')
+      initClockworkTZ({ engine: 'system-intl' })
+
+      // Update status display
+      function updateStatus() {
+        const status = getStatus()
+        document.getElementById('engine-status').textContent = status.engine
+        document.getElementById('tzdb-status').textContent = status.tzdbVersion || 'N/A (system)'
+        document.getElementById('user-timezone').textContent = getUserTimeZone()
+      }
+
+      // Populate timezone selectors
+      function populateTimezoneSelectors() {
+        const zones = listTimeZones({ labelStyle: 'offset' })
+        const fromSelect = document.getElementById('from-zone')
+        const toSelect = document.getElementById('to-zone')
+
+        zones.forEach(zone => {
+          const option1 = new Option(zone.label, zone.value)
+          const option2 = new Option(zone.label, zone.value)
+          fromSelect.add(option1)
+          toSelect.add(option2)
+        })
+
+        // Set default values
+        fromSelect.value = 'UTC'
+        toSelect.value = getUserTimeZone()
+      }
+
+      // Update world clock
+      function updateWorldClock() {
+        const worldClockZones = [
+          'UTC',
+          'America/New_York',
+          'America/Los_Angeles',
+          'Europe/London',
+          'Europe/Paris',
+          'Asia/Tokyo',
+          'Australia/Sydney',
+          'Australia/Lord_Howe',
+          'Asia/Kathmandu',
+        ]
+
+        const now = new Date()
+        const clockContainer = document.getElementById('world-clock')
+        clockContainer.innerHTML = ''
+
+        worldClockZones.forEach(zone => {
+          const result = fromUTC(now, zone)
+          const formatted = format(now, zone, 'HH:mm:ss')
+          const date = format(now, zone, 'MMM dd')
+
+          const clockItem = document.createElement('div')
+          clockItem.className = 'clock-item'
+          clockItem.innerHTML = `
+                    <div class="clock-zone">${zone}</div>
+                    <div class="clock-time">${date} ${formatted}</div>
+                `
+          clockContainer.appendChild(clockItem)
+        })
+      }
+
+      // Convert timezone
+      window.convertTimezone = function () {
+        try {
+          const sourceTime = document.getElementById('source-time').value
+          const fromZone = document.getElementById('from-zone').value
+          const toZone = document.getElementById('to-zone').value
+
+          if (!sourceTime || !fromZone || !toZone) {
+            throw new Error('Please fill in all fields')
+          }
+
+          const result = convert(sourceTime, fromZone, toZone)
+          const formatted = format(result.utc, toZone, FORMAT_PATTERNS.human)
+
+          document.getElementById('conversion-result').innerHTML = `
+                    <div class="conversion-result">
+                        <h4>Conversion Result:</h4>
+                        <p><strong>From:</strong> ${sourceTime} (${fromZone})</p>
+                        <p><strong>To:</strong> ${formatted} (${toZone})</p>
+                        <p><strong>UTC:</strong> ${result.utc}</p>
+                        <p><strong>Offset:</strong> ${formatOffset(result.offsetMinutes)}</p>
+                        <p><strong>DST:</strong> ${result.isDST ? 'Yes' : 'No'}</p>
+                    </div>
+                `
+        } catch (error) {
+          document.getElementById('conversion-result').innerHTML = `
+                    <div class="conversion-result error">
+                        <h4>Error:</h4>
+                        <p>${error.message}</p>
+                    </div>
+                `
+        }
+      }
+
+      // Update timezone list
+      window.updateTimezoneList = function () {
+        const labelStyle = document.getElementById('label-style').value
+        const zones = listTimeZones({ labelStyle })
+        const listContainer = document.getElementById('timezone-list')
+
+        listContainer.innerHTML = zones
+          .slice(0, 20)
+          .map(
+            zone => `
+                <div class="clock-item">
+                    <div class="clock-zone">${zone.value}</div>
+                    <div class="clock-time">${zone.label}</div>
+                </div>
+            `
+          )
+          .join('')
+      }
+
+      // Toggle real-time clock
+      window.toggleClock = function () {
+        if (isClockRunning) {
+          if (clockInterval) {
+            clockInterval()
+            clockInterval = null
+          }
+          isClockRunning = false
+          document.getElementById('clock-toggle-text').textContent = 'Start Real-time Clock'
+          document.getElementById('realtime-status').textContent = 'Real-time clock stopped'
+        } else {
+          clockInterval = onTick(() => {
+            updateWorldClock()
+          }, 1000)
+          isClockRunning = true
+          document.getElementById('clock-toggle-text').textContent = 'Stop Real-time Clock'
+          document.getElementById('realtime-status').textContent = 'Real-time clock running...'
+        }
+      }
+
+      // Toggle transition watching
+      window.toggleTransitionWatch = function () {
+        if (isWatchingTransitions) {
+          transitionWatchers.forEach(stop => stop())
+          transitionWatchers = []
+          isWatchingTransitions = false
+          document.getElementById('transition-toggle-text').textContent = 'Watch DST Transitions'
+          document.getElementById('realtime-status').textContent = 'Stopped watching transitions'
+        } else {
+          const watchZones = ['America/New_York', 'Europe/London', 'Australia/Sydney']
+
+          watchZones.forEach(zone => {
+            const stopWatching = watchZoneTransitions(zone, transitionDate => {
+              document.getElementById('realtime-status').innerHTML = `
+                            DST Transition detected in ${zone} at ${transitionDate.toISOString()}
+                        `
+            })
+            transitionWatchers.push(stopWatching)
+          })
+
+          isWatchingTransitions = true
+          document.getElementById('transition-toggle-text').textContent =
+            'Stop Watching Transitions'
+          document.getElementById('realtime-status').textContent =
+            `Watching ${watchZones.length} zones for DST transitions...`
+        }
+      }
+
+      // Utility function to format offset
+      function formatOffset(offsetMinutes) {
+        const sign = offsetMinutes >= 0 ? '+' : '-'
+        const absMinutes = Math.abs(offsetMinutes)
+        const hours = Math.floor(absMinutes / 60)
+        const minutes = absMinutes % 60
+
+        return `${sign}${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
+      }
+
+      // Initialize the page
+      updateStatus()
+      populateTimezoneSelectors()
+      updateWorldClock()
+      updateTimezoneList()
+
+      // Set up initial datetime value to current time
+      const now = new Date()
+      const localDatetime = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+      document.getElementById('source-time').value = localDatetime.toISOString().slice(0, 16)
+
+      console.log('Browser example initialized successfully!')
+    </script>
+  </body>
+</html>
