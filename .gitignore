@@ -97,3 +97,8 @@ temp/
 test-results/
 playwright-report/
 test-results.xml
+
+# Published package testing files (temporary)
+test-published-*.mjs
+test-published-*.html
+*-test/
