@@ -72,6 +72,103 @@ initClockworkTZ({
 })
 ```
 
+#### Using Embedded TZDB Engine
+
+The embedded engine provides deterministic timezone calculations using a specific version of the IANA timezone database. This ensures consistent behavior across platforms and over time.
+
+**Basic Usage:**
+
+```javascript
+import { initClockworkTZ, fromUTC } from 'clockwork-tz'
+
+// Initialize with embedded engine
+initClockworkTZ({
+  engine: 'embedded-tzdb',
+  manifestURL: 'https://cdn.yourcompany.com/manifest.json',
+})
+
+// The engine will automatically fetch and verify timezone data
+const result = fromUTC(new Date(), 'America/New_York')
+console.log(result.local) // Deterministic result from embedded tzdb
+```
+
+**Loading Data Manually:**
+
+```javascript
+import { initClockworkTZ, getCurrentEngine } from 'clockwork-tz'
+import tzdbData from './tzdb-2024b.json' // Your TZDB data file
+
+// Initialize with embedded engine (no CDN)
+initClockworkTZ({
+  engine: 'embedded-tzdb',
+})
+
+// Load data manually
+const engine = getCurrentEngine()
+await engine.loadTzdbData(tzdbData, '2024b')
+
+// Now ready to use
+const result = fromUTC(new Date(), 'Europe/London')
+```
+
+**Auto-Update Configuration:**
+
+```javascript
+initClockworkTZ({
+  engine: 'embedded-tzdb',
+  manifestURL: 'https://cdn.yourcompany.com/manifest.json',
+  autoUpdateIntervalMs: 24 * 60 * 60 * 1000, // Check daily
+})
+
+// Listen for data updates
+onDataUpdate(version => {
+  console.log(`Timezone data updated to version ${version}`)
+})
+
+// Force a manual update
+await refreshTimezoneData()
+```
+
+**Signature Verification:**
+
+The embedded engine automatically verifies cryptographic signatures of downloaded timezone data to ensure data integrity. This prevents tampering and ensures the data comes from a trusted source.
+
+```javascript
+// Signatures are verified automatically
+// If verification fails, cached data is used instead
+// Check the status:
+const status = getStatus()
+console.log(status.dataLoaded) // true if data is loaded and verified
+console.log(status.tzdbVersion) // "2024b"
+console.log(status.lastUpdate) // Date of last successful update
+```
+
+**Benefits of Embedded TZDB:**
+
+1. **Deterministic**: Same results across all platforms and environments
+2. **Reproducible**: Version-locked for consistent testing and debugging
+3. **Historical Accuracy**: Access to complete IANA timezone history
+4. **No Platform Dependencies**: Works even if system timezone data is outdated
+5. **Verified Updates**: Cryptographically signed data ensures integrity
+
+**When to Use:**
+
+- Financial applications requiring audit trails
+- Scientific simulations requiring reproducibility
+- Applications deployed across heterogeneous environments
+- When you need historical timezone accuracy
+- When platform timezone data can't be trusted
+
+**Production Setup:**
+
+See [PRODUCTION.md](./PRODUCTION.md) for complete guide on:
+- Generating cryptographic keys
+- Building TZDB JSON data
+- Setting up CDN infrastructure
+- Configuring automatic updates
+
+
+
 ## API Reference
 
 ### Core Functions

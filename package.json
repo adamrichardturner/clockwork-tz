@@ -25,6 +25,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "build:tzdb": "tsx scripts/build-tzdb-json.ts",
     "dev": "tsup --watch",
     "test": "vitest",
     "test:run": "vitest run",
@@ -73,6 +74,7 @@
     "husky": "^9.0.11",
     "prettier": "^3.3.2",
     "tsup": "^8.1.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.4.5",
     "vitest": "^1.6.0"
   },

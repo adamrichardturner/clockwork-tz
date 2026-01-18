@@ -30,6 +30,7 @@ import { normalizeToDate } from './utils/iso.js'
 let currentEngine: TzEngine = createSystemIntlEngine()
 let initOptions: ClockworkOptions = {}
 let updateListeners: Set<(version: string) => void> = new Set()
+let lastUpdateTimestamp: Date | undefined = undefined
 
 /**
  * Initialize clockwork-tz with options
@@ -76,6 +77,7 @@ export function initClockworkTZ(opts: ClockworkOptions = {}): void {
         const result = await ensureFreshTzdb(manifestURL)
         if (result && 'loadTzdbData' in currentEngine) {
           await (currentEngine as any).loadTzdbData(result.data, result.version)
+          lastUpdateTimestamp = new Date()
 
           // Notify listeners
           for (const listener of updateListeners) {
@@ -331,6 +333,7 @@ export async function refreshTimezoneData(): Promise<void> {
   const result = await ensureFreshTzdb(manifestURL)
   if (result && 'loadTzdbData' in currentEngine) {
     await (currentEngine as any).loadTzdbData(result.data, result.version)
+    lastUpdateTimestamp = new Date()
 
     // Notify listeners
     for (const listener of updateListeners) {
@@ -362,6 +365,6 @@ export function getStatus(): {
     engine: currentEngine.kind,
     tzdbVersion: currentEngine.getVersion() ?? undefined,
     dataLoaded: isDataLoaded,
-    lastUpdate: undefined, // TODO: Track last update timestamp
+    lastUpdate: lastUpdateTimestamp
   }
 }

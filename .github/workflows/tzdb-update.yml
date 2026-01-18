@@ -97,56 +97,57 @@ jobs:
 
       - name: Build JSON data
         run: |
-          # TODO: Implement TZDB to JSON conversion
-          # This would involve:
-          # 1. Parsing IANA timezone database files
-          # 2. Converting to structured JSON format
-          # 3. Optimizing for size and lookup performance
+          npm run build:tzdb ${{ needs.check-tzdb-version.outputs.new_version }}
 
-          VERSION="${{ needs.check-tzdb-version.outputs.new_version }}"
-
-          # Placeholder: create mock JSON structure
-          cat > tzdb-data.json << EOF
-          {
-            "version": "$VERSION",
-            "releaseDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "zones": {
-              "UTC": {
-                "name": "UTC",
-                "rules": []
-              }
-            },
-            "rules": {},
-            "links": {}
-          }
-          EOF
-
-          echo "Generated tzdb-data.json with version $VERSION"
-
-      - name: Generate signature
+      - name: Sign data with private key
+        env:
+          TZDB_PRIVATE_KEY: ${{ secrets.TZDB_PRIVATE_KEY }}
         run: |
-          # TODO: Implement proper cryptographic signing
-          # This should use a private key to sign the JSON data
+          VERSION="${{ needs.check-tzdb-version.outputs.new_version }}"
+          DATA_FILE="data/tzdb-${VERSION}.json"
+          
+          # Write private key to temporary file
+          echo "$TZDB_PRIVATE_KEY" > temp-private-key.pem
+          chmod 600 temp-private-key.pem
+          
+          # Sign the data using RSA-PSS with SHA-256
+          openssl dgst -sha256 -sign temp-private-key.pem \
+            -sigopt rsa_pss_saltlen:32 \
+            -out "${DATA_FILE}.sig" \
+            "$DATA_FILE"
+          
+          # Convert to base64 for JSON
+          SIGNATURE=$(base64 -i "${DATA_FILE}.sig")
+          echo "SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
+          
+          # Clean up private key
+          shred -u temp-private-key.pem
+          
+          echo "Data signed successfully"
 
-          # Placeholder: generate mock signature
-          echo "mock_signature_$(date +%s)" > tzdb-data.sig
-          echo "Generated signature file"
-
-      - name: Create manifest
+      - name: Update manifest
         run: |
           VERSION="${{ needs.check-tzdb-version.outputs.new_version }}"
           RELEASE_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          SIGNATURE=$(cat tzdb-data.sig)
-
-          # TODO: Use actual CDN URLs
-          cat > manifest.json << EOF
+          DATA_FILE="data/tzdb-${VERSION}.json"
+          
+          # Calculate file hash
+          FILE_HASH=$(sha256sum "$DATA_FILE" | cut -d' ' -f1)
+          FILE_SIZE=$(stat -f%z "$DATA_FILE" 2>/dev/null || stat -c%s "$DATA_FILE")
+          
+          # Update manifest.json with real data
+          cat > data/manifest.json << EOF
           {
             "version": "$VERSION",
             "releaseDate": "$RELEASE_DATE",
-            "dataUrl": "https://cdn.clockwork-tz.dev/data/tzdb-$VERSION.json",
-            "signature": "$SIGNATURE"
+            "dataUrl": "https://cdn.clockwork-tz.dev/tzdb-${VERSION}.json",
+            "size": $FILE_SIZE,
+            "signature": "$SIGNATURE",
+            "sha256": "$FILE_HASH"
           }
           EOF
+          
+          echo "Manifest updated successfully"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
