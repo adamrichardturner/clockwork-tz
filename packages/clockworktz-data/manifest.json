@@ -1,7 +1,7 @@
 {
   "version": "2026f",
-  "releaseDate": "2026-11-01T08:07:19.696Z",
-  "dataUrl": "https://cdn.jsdelivr.net/npm/clockworktz-data@1.2026.6/tzdb.json",
+  "releaseDate": "2026-11-01T08:15:18.006Z",
+  "dataUrl": "https://cdn.jsdelivr.net/npm/@adamrichardturner/clockworktz-data@1.2026.6/tzdb.json",
   "sha256": "4ce4303530d44f85a22fc801f9289d91a358005523e678cf3bc6e7ffa5e7c29c",
   "signature": "Txd4kbmGHdec9E/cCAIADYc7j48YYmO7X1VpVZk+VePCWfPCdvyIIyXzV/tjQ9K/I2oEohfIstN+8Uwk3fJ9Dg==",
   "keyId": "63afe89a3ee676d5"
