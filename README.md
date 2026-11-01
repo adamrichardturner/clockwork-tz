@@ -1,11 +1,11 @@
-# clockwork-tz
+# clockworktz
 
-[![npm version](https://img.shields.io/npm/v/clockwork-tz.svg)](https://www.npmjs.com/package/clockwork-tz)
-[![CI](https://github.com/adamrichardturner/clockwork-tz/actions/workflows/ci.yml/badge.svg)](https://github.com/adamrichardturner/clockwork-tz/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/clockworktz.svg)](https://www.npmjs.com/package/clockworktz)
+[![CI](https://github.com/adamrichardturner/clockworktz/actions/workflows/ci.yml/badge.svg)](https://github.com/adamrichardturner/clockworktz/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Docs](https://img.shields.io/badge/docs-clockworktz.dev-b45309)](https://clockworktz.dev/docs)
 
-Timezone conversions that get the weird zones right. clockwork-tz handles half-hour and
+Timezone conversions that get the weird zones right. clockworktz handles half-hour and
 45-minute offsets, 30-minute DST, skipped days, negative DST and historical local mean time,
 and it resolves local times inside DST gaps and overlaps exactly the way
 [Temporal](https://tc39.es/proposal-temporal/docs/) does.
@@ -23,7 +23,7 @@ and it resolves local times inside DST gaps and overlaps exactly the way
 ## Installation
 
 ```bash
-npm install clockwork-tz
+npm install clockworktz
 ```
 
 Node.js 20 or later, or any browser with `Intl.DateTimeFormat` time zone support.
@@ -31,7 +31,7 @@ Node.js 20 or later, or any browser with `Intl.DateTimeFormat` time zone support
 ## Quick start
 
 ```ts
-import { fromUTC, convert, interpretLocal, format } from 'clockwork-tz'
+import { fromUTC, convert, interpretLocal, format } from 'clockworktz'
 
 fromUTC('2024-07-15T14:00:00Z', 'Australia/Lord_Howe')
 // {
@@ -73,7 +73,7 @@ A local time can be **skipped** (spring forward) or **repeated** (fall back).
 | `reject`                 | throws `InvalidTimeError`           | throws `AmbiguousTimeError` |
 
 ```ts
-import { interpretLocal, AmbiguousTimeError } from 'clockwork-tz'
+import { interpretLocal, AmbiguousTimeError } from 'clockworktz'
 
 // 01:30 happens twice in New York on 3 November 2024
 interpretLocal('2024-11-03T01:30:00', 'America/New_York').utc // '2024-11-03T05:30:00.000Z' (EDT)
@@ -108,12 +108,12 @@ does not expose the DST flag.
 
 Uses a compiled IANA tzdb release for deterministic results on every platform, including
 exact DST flags and abbreviations, local mean time before standardisation, and every
-transition. A snapshot ships in the `clockwork-tz/tzdb` subpath, so you only pay for it if
+transition. A snapshot ships in the `clockworktz/tzdb` subpath, so you only pay for it if
 you import it:
 
 ```ts
-import { initClockworkTZ, tzdbVersion } from 'clockwork-tz'
-import { tzdb } from 'clockwork-tz/tzdb'
+import { initClockworkTZ, tzdbVersion } from 'clockworktz'
+import { tzdb } from 'clockworktz/tzdb'
 
 await initClockworkTZ({ engine: 'embedded-tzdb', data: tzdb })
 tzdbVersion() // '2026f'
@@ -125,13 +125,13 @@ IANA publishes several releases a year, sometimes at short notice. To pick them 
 releasing your app again, point the engine at the signed manifest:
 
 ```ts
-import { initClockworkTZ, DEFAULT_MANIFEST_URL } from 'clockwork-tz'
-import { tzdb } from 'clockwork-tz/tzdb'
+import { initClockworkTZ, DEFAULT_MANIFEST_URL } from 'clockworktz'
+import { tzdb } from 'clockworktz/tzdb'
 
 await initClockworkTZ({
   engine: 'embedded-tzdb',
   data: tzdb, // used immediately and whenever an update can't be verified
-  manifestURL: DEFAULT_MANIFEST_URL, // jsDelivr, from the clockwork-tz-data package
+  manifestURL: DEFAULT_MANIFEST_URL, // jsDelivr, from the clockworktz-data package
   autoUpdateIntervalMs: 24 * 60 * 60 * 1000, // 0 disables periodic checks
 })
 ```
@@ -184,7 +184,7 @@ interpretLocal({ year: 2024, month: 11, day: 3, hour: 1, minute: 30 }, 'America/
 
 ### Errors
 
-Everything clockwork-tz throws is a `TimezoneError`: invalid zones, unparseable input,
+Everything clockworktz throws is a `TimezoneError`: invalid zones, unparseable input,
 unsupported format tokens and invalid data. `InvalidTimeError` (skipped time) and
 `AmbiguousTimeError` (repeated time) are subclasses thrown by `disambiguation: 'reject'`.
 
@@ -215,7 +215,7 @@ there are also `formatWithPattern`, `formatFor`, `formatRange`, `formatDuration`
 ### Transitions and clocks
 
 ```ts
-import { getNextTransition, getTransitions, watchZoneTransitions, onTick } from 'clockwork-tz'
+import { getNextTransition, getTransitions, watchZoneTransitions, onTick } from 'clockworktz'
 
 getNextTransition('Australia/Lord_Howe', '2024-07-15T14:00:00Z')
 // { date: 2024-10-05T15:30:00.000Z, fromOffset: 630, toOffset: 660,

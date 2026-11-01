@@ -3,7 +3,7 @@
  *
  *   TZDB_SIGNING_KEY="$(cat key.pem)" node scripts/sign-tzdb.ts
  *
- * Reads packages/clockwork-tz-data/tzdb.json, writes manifest.json next to it
+ * Reads packages/clockworktz-data/tzdb.json, writes manifest.json next to it
  * and sets the data package version to 1.<year>.<release> (2026f -> 1.2026.6).
  * The signature covers `${version}\n${sha256}` and verifies with the raw
  * Ed25519 public key in src/data/updater.ts (DEFAULT_PUBLIC_KEY).
@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { TzdbManifest } from '../src/data/types.ts'
 
-const PACKAGE_DIR = resolve(import.meta.dirname, '..', 'packages', 'clockwork-tz-data')
+const PACKAGE_DIR = resolve(import.meta.dirname, '..', 'packages', 'clockworktz-data')
 
 export function packageVersion(tzdbVersion: string): string {
   const match = /^(\d{4})([a-z]+)$/.exec(tzdbVersion)
@@ -47,7 +47,7 @@ function main(): void {
   const manifest: TzdbManifest = {
     version,
     releaseDate: new Date().toISOString(),
-    dataUrl: `https://cdn.jsdelivr.net/npm/clockwork-tz-data@${npmVersion}/tzdb.json`,
+    dataUrl: `https://cdn.jsdelivr.net/npm/clockworktz-data@${npmVersion}/tzdb.json`,
     sha256,
     signature,
     keyId: createHash('sha256').update(publicKey).digest('hex').slice(0, 16),
@@ -59,7 +59,7 @@ function main(): void {
   pkg.version = npmVersion
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
 
-  console.log(`Signed tzdb ${version} as clockwork-tz-data@${npmVersion} (public key ${publicKey})`)
+  console.log(`Signed tzdb ${version} as clockworktz-data@${npmVersion} (public key ${publicKey})`)
 }
 
 if (import.meta.main) {

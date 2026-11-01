@@ -48,7 +48,7 @@ describe('API', () => {
   it('explains how to load data when the embedded engine has none', async () => {
     await initClockworkTZ({ engine: 'embedded-tzdb' })
     expect(getStatus().dataLoaded).toBe(false)
-    expect(() => getCurrentEngine().getZoneInfo(0, 'UTC')).toThrow(/clockwork-tz\/tzdb/)
+    expect(() => getCurrentEngine().getZoneInfo(0, 'UTC')).toThrow(/clockworktz\/tzdb/)
     await expect(refreshTimezoneData()).rejects.toThrow(TimezoneError)
   })
 

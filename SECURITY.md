@@ -8,7 +8,7 @@ reply within a few days.
 ## Timezone data signing
 
 The `embedded-tzdb` engine can fetch tzdb updates at runtime. Each release of the
-`clockwork-tz-data` package contains:
+`clockworktz-data` package contains:
 
 - `tzdb.json`: the compiled data
 - `manifest.json`: `{ version, releaseDate, dataUrl, sha256, signature, keyId }`

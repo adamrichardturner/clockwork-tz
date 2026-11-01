@@ -1,5 +1,5 @@
 /**
- * Build clockwork-tz timezone data from an IANA tzdb release.
+ * Build clockworktz timezone data from an IANA tzdb release.
  *
  *   node scripts/build-tzdb.ts [version]
  *
@@ -7,8 +7,8 @@
  * format (positive DST everywhere, matching ICU) to slim TZif files, and
  * converts those into the compact JSON the embedded engine reads:
  *
- *   packages/clockwork-tz-data/tzdb.json   data file published to the CDN
- *   src/tzdb/data.generated.ts             bundled snapshot for `clockwork-tz/tzdb`
+ *   packages/clockworktz-data/tzdb.json   data file published to the CDN
+ *   src/tzdb/data.generated.ts             bundled snapshot for `clockworktz/tzdb`
  */
 
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
   }
   console.log(`Building tzdb ${version}`)
 
-  const work = mkdtempSync(join(tmpdir(), 'clockwork-tzdb-'))
+  const work = mkdtempSync(join(tmpdir(), 'clockworktz-build-'))
   try {
     const tarballs = [`tzcode${version}.tar.gz`, `tzdata${version}.tar.gz`]
     for (const name of tarballs) {
@@ -190,7 +190,7 @@ async function main(): Promise<void> {
     }
 
     const json = JSON.stringify(data)
-    writeFileSync(join(ROOT, 'packages', 'clockwork-tz-data', 'tzdb.json'), json)
+    writeFileSync(join(ROOT, 'packages', 'clockworktz-data', 'tzdb.json'), json)
     writeFileSync(
       join(ROOT, 'src', 'tzdb', 'data.generated.ts'),
       [

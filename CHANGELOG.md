@@ -17,9 +17,9 @@ First release.
   (default), `earliest`, `latest` and `reject`.
 - Fixed-offset zones such as `+05:30`, and IANA links such as `Asia/Calcutta`.
 - `system-intl` engine using the platform's `Intl` timezone data.
-- `embedded-tzdb` engine backed by compiled IANA tzdb data (`clockwork-tz/tzdb`), with exact
+- `embedded-tzdb` engine backed by compiled IANA tzdb data (`clockworktz/tzdb`), with exact
   DST flags, abbreviations, local mean time and transitions.
-- Ed25519-signed tzdb updates via the `clockwork-tz-data` package on jsDelivr.
+- Ed25519-signed tzdb updates via the `clockworktz-data` package on jsDelivr.
 - A built-in formatter supporting a date-fns-compatible subset of tokens.
 - Transition lookup (`getNextTransition`, `getPreviousTransition`, `getTransitions`),
   transition watchers and `onTick`.
@@ -33,4 +33,4 @@ First release.
 - The tzdb build verifies IANA's signatures on its downloads, and CI checks the committed
   data rebuilds byte for byte.
 
-[1.0.0]: https://github.com/adamrichardturner/clockwork-tz/commits/main
+[1.0.0]: https://github.com/adamrichardturner/clockworktz/commits/main

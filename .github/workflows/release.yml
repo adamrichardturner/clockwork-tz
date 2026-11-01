@@ -74,8 +74,8 @@ jobs:
         run: |
           if [ "${{ steps.meta.outputs.dry_run }}" = "true" ]; then
             npm publish --dry-run --ignore-scripts --access public --provenance=false --tag "$DIST_TAG"
-          elif npm view "clockwork-tz@$VERSION" version > /dev/null 2>&1; then
-            echo "clockwork-tz@$VERSION is already published; skipping"
+          elif npm view "clockworktz@$VERSION" version > /dev/null 2>&1; then
+            echo "clockworktz@$VERSION is already published; skipping"
           else
             npm publish --ignore-scripts --provenance --access public --tag "$DIST_TAG"
           fi

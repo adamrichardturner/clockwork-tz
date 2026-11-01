@@ -11,17 +11,17 @@ import type { TzdbManifest, CachedTzdbData } from './types.js'
 import { getCacheStorage, createBroadcastChannel } from '../utils/env.js'
 
 /**
- * Default manifest, published with the `clockwork-tz-data` package
+ * Default manifest, published with the `clockworktz-data` package
  */
-export const DEFAULT_MANIFEST_URL = 'https://cdn.jsdelivr.net/npm/clockwork-tz-data@1/manifest.json'
+export const DEFAULT_MANIFEST_URL = 'https://cdn.jsdelivr.net/npm/clockworktz-data@1/manifest.json'
 
 /**
  * Raw Ed25519 public key (base64) that signs the official manifests
  */
 export const DEFAULT_PUBLIC_KEY = 'DLvL/miUAfXKI8Sae27IuV/o5l3vbg5OIp5QMkeXLkU='
 
-export const CACHE_KEY_PREFIX = 'clockwork-tz:'
-export const BROADCAST_CHANNEL_NAME = 'clockwork-tz-updates'
+export const CACHE_KEY_PREFIX = 'clockworktz:'
+export const BROADCAST_CHANNEL_NAME = 'clockworktz-updates'
 
 /**
  * Cache TTL for timezone data before the manifest is checked again (24 hours)

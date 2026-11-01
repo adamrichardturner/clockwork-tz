@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Node.js example demonstrating clockwork-tz usage
+ * Node.js example demonstrating clockworktz usage
  *
  * Run with: node examples/node.mjs
  */
@@ -19,7 +19,7 @@ import {
 } from '../dist/index.js'
 
 // Initialize the library
-console.log('Initializing clockwork-tz...')
+console.log('Initializing clockworktz...')
 initClockworkTZ({ engine: 'system-intl' })
 
 const status = getStatus()
@@ -174,9 +174,7 @@ const stopTicking = onTick(now => {
       }
 
       console.log('\nAll examples completed successfully!')
-      console.log(
-        '\nFor more information, visit: https://github.com/adamrichardturner/clockwork-tz'
-      )
+      console.log('\nFor more information, visit: https://github.com/adamrichardturner/clockworktz')
     }, 1000)
   }
 }, 1000)

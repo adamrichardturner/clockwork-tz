@@ -1,7 +1,7 @@
 /**
  * Bundled IANA timezone data for the embedded-tzdb engine.
  *
- *   import { tzdb } from 'clockwork-tz/tzdb'
+ *   import { tzdb } from 'clockworktz/tzdb'
  *   initClockworkTZ({ engine: 'embedded-tzdb', data: tzdb })
  */
 

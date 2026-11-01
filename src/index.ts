@@ -1,5 +1,5 @@
 /**
- * clockwork-tz - Accurate timezone conversions and DST handling
+ * clockworktz - Accurate timezone conversions and DST handling
  *
  * @license MIT
  */

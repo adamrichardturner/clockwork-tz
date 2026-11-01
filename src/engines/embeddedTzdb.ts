@@ -110,7 +110,7 @@ export class EmbeddedTzdbEngine implements LoadableEngine {
 
   loadTzdbData(data: unknown): void {
     if (!isTzdbData(data)) {
-      throw new TimezoneError('Invalid timezone data: expected clockwork-tz tzdb JSON')
+      throw new TimezoneError('Invalid timezone data: expected clockworktz tzdb JSON')
     }
     const lookup = new Map<string, string>()
     for (const zone of Object.keys(data.zones)) {
@@ -218,7 +218,7 @@ export class EmbeddedTzdbEngine implements LoadableEngine {
   }
 
   private noDataMessage(): string {
-    return 'No timezone data loaded: pass `data` (e.g. from "clockwork-tz/tzdb") or a manifestURL to initClockworkTZ'
+    return 'No timezone data loaded: pass `data` (e.g. from "clockworktz/tzdb") or a manifestURL to initClockworkTZ'
   }
 
   private record(zone: string): ZoneRecord {
