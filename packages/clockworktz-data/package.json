@@ -1,17 +1,17 @@
 {
-  "name": "clockwork-tz-data",
+  "name": "clockworktz-data",
   "version": "1.2026.6",
-  "description": "Signed IANA timezone data for clockwork-tz's embedded-tzdb engine",
+  "description": "Signed IANA timezone data for clockworktz's embedded-tzdb engine",
   "homepage": "https://clockworktz.dev/docs/engines",
   "bugs": {
-    "url": "https://github.com/adamrichardturner/clockwork-tz/issues"
+    "url": "https://github.com/adamrichardturner/clockworktz/issues"
   },
   "license": "MIT",
   "author": "Adam Turner <hello@adamrichardturner.dev>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/adamrichardturner/clockwork-tz.git",
-    "directory": "packages/clockwork-tz-data"
+    "url": "git+https://github.com/adamrichardturner/clockworktz.git",
+    "directory": "packages/clockworktz-data"
   },
   "files": [
     "tzdb.json",
@@ -23,7 +23,7 @@
     "tzdb",
     "iana",
     "timezone",
-    "clockwork-tz"
+    "clockworktz"
   ],
   "publishConfig": {
     "access": "public",

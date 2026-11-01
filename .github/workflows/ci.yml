@@ -103,13 +103,13 @@ jobs:
         run: |
           mkdir smoke && cd smoke
           npm init -y > /dev/null
-          npm install ../clockwork-tz-*.tgz typescript@~7.0.2
+          npm install ../clockworktz-*.tgz typescript@~7.0.2
       - name: ESM import
         working-directory: smoke
         run: |
           cat > esm.mjs <<'JS'
-          import { fromUTC, initClockworkTZ } from 'clockwork-tz'
-          import { tzdb } from 'clockwork-tz/tzdb'
+          import { fromUTC, initClockworkTZ } from 'clockworktz'
+          import { tzdb } from 'clockworktz/tzdb'
           await initClockworkTZ({ engine: 'embedded-tzdb', data: tzdb })
           const r = fromUTC('2024-07-15T14:00:00Z', 'Asia/Kathmandu')
           if (r.offsetMinutes !== 345) throw new Error(`unexpected ${r.offsetMinutes}`)
@@ -120,8 +120,8 @@ jobs:
         working-directory: smoke
         run: |
           cat > cjs.cjs <<'JS'
-          const { fromUTC } = require('clockwork-tz')
-          const { TZDB_VERSION } = require('clockwork-tz/tzdb')
+          const { fromUTC } = require('clockworktz')
+          const { TZDB_VERSION } = require('clockworktz/tzdb')
           const r = fromUTC('2024-07-15T14:00:00Z', 'Australia/Lord_Howe')
           if (r.offsetMinutes !== 630) throw new Error(`unexpected ${r.offsetMinutes}`)
           console.log('CJS ok', r.local, TZDB_VERSION)
@@ -132,8 +132,8 @@ jobs:
         working-directory: smoke
         run: |
           cat > types.mts <<'TS'
-          import { fromUTC, type ClockworkTime } from 'clockwork-tz'
-          import { tzdb, type TzdbData } from 'clockwork-tz/tzdb'
+          import { fromUTC, type ClockworkTime } from 'clockworktz'
+          import { tzdb, type TzdbData } from 'clockworktz/tzdb'
           const t: ClockworkTime = fromUTC(0, 'UTC')
           const d: TzdbData = tzdb
           console.log(t.utc, d.version)
@@ -157,10 +157,10 @@ jobs:
         env:
           TZDB_REQUIRE_SIGNATURE: '1'
         run: |
-          VERSION=$(node -p "require('./packages/clockwork-tz-data/tzdb.json').version")
+          VERSION=$(node -p "require('./packages/clockworktz-data/tzdb.json').version")
           node scripts/build-tzdb.ts "$VERSION"
       - name: Generated data matches the committed data
-        run: git diff --exit-code -- src/tzdb/data.generated.ts packages/clockwork-tz-data/tzdb.json
+        run: git diff --exit-code -- src/tzdb/data.generated.ts packages/clockworktz-data/tzdb.json
 
   audit:
     name: Security audit

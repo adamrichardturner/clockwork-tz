@@ -53,7 +53,7 @@ jobs:
             echo "Unexpected tzdb version: $LATEST" >&2
             exit 1
           fi
-          CURRENT=$(node -p "require('./packages/clockwork-tz-data/tzdb.json').version")
+          CURRENT=$(node -p "require('./packages/clockworktz-data/tzdb.json').version")
           echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
           # A dry run always builds, so the pipeline can be tested without a new release
@@ -90,24 +90,24 @@ jobs:
         if: steps.versions.outputs.build == 'true'
         run: npm install -g npm@latest
 
-      - name: Publish clockwork-tz-data
+      - name: Publish clockworktz-data
         if: steps.versions.outputs.build == 'true'
-        working-directory: packages/clockwork-tz-data
+        working-directory: packages/clockworktz-data
         env:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
           if [ "$DRY_RUN" = "true" ]; then
             npm publish --dry-run --access public --provenance=false
-          elif npm view "clockwork-tz-data@$VERSION" version > /dev/null 2>&1; then
-            echo "clockwork-tz-data@$VERSION is already published; skipping"
+          elif npm view "clockworktz-data@$VERSION" version > /dev/null 2>&1; then
+            echo "clockworktz-data@$VERSION is already published; skipping"
           else
             npm publish --provenance --access public
           fi
 
       - name: Refresh the jsDelivr cache for the manifest
         if: steps.versions.outputs.build == 'true' && inputs.dry_run != true
-        run: curl -fsS https://purge.jsdelivr.net/npm/clockwork-tz-data@1/manifest.json || true
+        run: curl -fsS https://purge.jsdelivr.net/npm/clockworktz-data@1/manifest.json || true
 
       - name: Open pull request with the new bundled snapshot
         id: pr
@@ -122,7 +122,7 @@ jobs:
             Updates the bundled IANA timezone database from ${{ steps.versions.outputs.current }} to ${{ steps.versions.outputs.latest }}.
 
             - Built with `scripts/build-tzdb.ts` (IANA signatures verified) and signed with `scripts/sign-tzdb.ts`
-            - `clockwork-tz-data` is published, so the signed manifest on jsDelivr already serves this release
+            - `clockworktz-data` is published, so the signed manifest on jsDelivr already serves this release
             - Tests passed against the new data, and CI is started on this branch automatically
 
             Release notes: https://data.iana.org/time-zones/tzdb/NEWS

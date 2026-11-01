@@ -1,5 +1,5 @@
 {
-  "name": "clockwork-tz",
+  "name": "clockworktz",
   "version": "1.0.0",
   "description": "Timezone conversions that get the weird zones right: exact DST disambiguation, half- and quarter-hour offsets, and an optional deterministic IANA tzdb engine. Zero dependencies.",
   "keywords": [
@@ -22,11 +22,11 @@
   ],
   "homepage": "https://clockworktz.dev",
   "bugs": {
-    "url": "https://github.com/adamrichardturner/clockwork-tz/issues"
+    "url": "https://github.com/adamrichardturner/clockworktz/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/adamrichardturner/clockwork-tz.git"
+    "url": "git+https://github.com/adamrichardturner/clockworktz.git"
   },
   "license": "MIT",
   "author": "Adam Turner <hello@adamrichardturner.dev>",

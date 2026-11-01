@@ -1,5 +1,5 @@
 /**
- * Main API implementation for clockwork-tz
+ * Main API implementation for clockworktz
  */
 
 import type {
@@ -90,7 +90,7 @@ async function loadFromManifest(manifestURL: string, publicKey?: string): Promis
 }
 
 /**
- * Initialize clockwork-tz with options. Calling it again replaces the engine,
+ * Initialize clockworktz with options. Calling it again replaces the engine,
  * any auto-update schedule and cross-tab listener.
  *
  * Throws TimezoneError synchronously for invalid options or data. Otherwise

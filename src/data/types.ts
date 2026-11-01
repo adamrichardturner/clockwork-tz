@@ -1,8 +1,8 @@
 /**
- * Core types and interfaces for clockwork-tz
+ * Core types and interfaces for clockworktz
  */
 
-/** Engine types supported by clockwork-tz */
+/** Engine types supported by clockworktz */
 export type EngineKind = 'system-intl' | 'embedded-tzdb'
 
 /**
@@ -99,12 +99,12 @@ export interface TimeZoneItem {
 }
 
 /**
- * Initialization options for clockwork-tz
+ * Initialization options for clockworktz
  */
 export interface ClockworkOptions {
   /** Engine to use for timezone calculations */
   engine?: EngineKind
-  /** Timezone data for the embedded-tzdb engine (e.g. from `clockwork-tz/tzdb`) */
+  /** Timezone data for the embedded-tzdb engine (e.g. from `clockworktz/tzdb`) */
   data?: unknown
   /** URL of a signed timezone database manifest to load and keep fresh */
   manifestURL?: string
@@ -215,7 +215,7 @@ export interface Environment {
 }
 
 /**
- * Base class for every error clockwork-tz throws: invalid zones, unparseable
+ * Base class for every error clockworktz throws: invalid zones, unparseable
  * input, unsupported format tokens and invalid timezone data
  */
 export class TimezoneError extends Error {
