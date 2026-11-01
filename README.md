@@ -164,17 +164,21 @@ See [Engines & tzdb data](https://clockworktz.dev/docs/engines) for a full compa
 | `isDST(instant, zone)`                                 | `false` for invalid zones                                                                |
 | `isValidTimeZone(zone)` / `canonicalizeTimeZone(zone)` | Validation and canonical names (`Asia/Calcutta` → `Asia/Kolkata`)                        |
 | `getUserTimeZone()`                                    | The runtime's zone, canonicalized, falling back to `UTC`                                 |
-| `getZoneCountries(zone)`                               | ISO country codes using the zone (`Europe/Zurich` → `CH`, `DE`, `LI`)                    |
+| `getZoneCountries(zone)`                               | ISO country codes using the zone (`Asia/Kathmandu` → `NP`)                               |
 | `listTimeZones({ labelStyle, at, locale, country })`   | Zones sorted by offset; `labelStyle` is `original`, `offset`, `abbrev` or `altName`      |
 
 `opts` accepts `format` (pattern for `local`), `locale` and `disambiguation`.
 
 Country data comes from IANA's `zone1970.tab` with the embedded engine, and from
 `Intl.Locale#getTimeZones` with the Intl engine where the runtime supports it (not all
-browsers do; without it, countries are empty).
+browsers do; without it, countries are empty). `zone1970.tab` lists every country sharing a
+zone, so with the embedded engine `Europe/Zurich` → `CH`, `DE`, `LI`.
+
+Labels and offsets describe the zones at `at` (default: now), so pass the date you're
+scheduling for:
 
 ```ts
-listTimeZones({ country: 'AU', labelStyle: 'offset' }).map(z => z.label)
+listTimeZones({ country: 'AU', labelStyle: 'offset', at: '2024-07-15T00:00:00Z' }).map(z => z.label)
 // ['(UTC+08:00) Australia/Perth', '(UTC+08:45) Australia/Eucla', …, '(UTC+10:30) Australia/Lord_Howe']
 
 interpretLocal({ year: 2024, month: 11, day: 3, hour: 1, minute: 30 }, 'America/New_York', {
