@@ -136,27 +136,49 @@ An update is only applied when all of these hold:
 - The data's SHA-256 matches the signed hash.
 - The version is newer than the data already loaded.
 
-Anything else keeps the current data. Verified data is cached in `localStorage` (browsers) or
-memory (Node), and other tabs are told about it through `BroadcastChannel`. If you host your
-own data, pass `publicKey`. See [SECURITY.md](./SECURITY.md) for the signing details.
+Anything else keeps the current data. Verified data is cached per manifest and key in
+`localStorage` (browsers) or memory (Node). Other tabs using the same manifest pick it up
+through `BroadcastChannel` and load it too. `onDataUpdate(version => …)` fires whenever new
+data is loaded. If you host your own data, pass `publicKey`. See [SECURITY.md](./SECURITY.md)
+for the signing details.
 
 ## API
 
 ### Conversion
 
-| Function                                               | Description                                                                         |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `fromUTC(instant, zone, opts?)`                        | Instant → `ClockworkTime` in `zone`                                                 |
-| `interpretLocal(wallTime, zone, opts?)`                | Wall-clock string (no offset) in `zone` → `ClockworkTime`                           |
-| `convert(input, fromZone, toZone, opts?)`              | Wall time in `fromZone` (or an instant) → `ClockworkTime` in `toZone`               |
-| `getZoneInfo(instant, zone)`                           | `{ offsetSeconds, isDST, abbreviation }`                                            |
-| `getOffset(instant, zone)`                             | Offset in minutes (fractional only for local mean time)                             |
-| `isDST(instant, zone)`                                 | `false` for invalid zones                                                           |
-| `isValidTimeZone(zone)` / `canonicalizeTimeZone(zone)` | Validation and canonical names (`Asia/Calcutta` → `Asia/Kolkata`)                   |
-| `getUserTimeZone()`                                    | The runtime's zone, falling back to `UTC`                                           |
-| `listTimeZones({ labelStyle, at, locale })`            | Zones sorted by offset; `labelStyle` is `original`, `offset`, `abbrev` or `altName` |
+| Function                                               | Description                                                                              |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `fromUTC(instant, zone, opts?)`                        | Instant → `ClockworkTime` in `zone`                                                      |
+| `interpretLocal(wallTime, zone, opts?)`                | Wall time (string without offset, or `{ year, month, day, hour?, … }`) → `ClockworkTime` |
+| `convert(input, fromZone, toZone, opts?)`              | Wall time in `fromZone` (or an instant) → `ClockworkTime` in `toZone`                    |
+| `getZoneInfo(instant, zone)`                           | `{ offsetSeconds, isDST, abbreviation }`                                                 |
+| `getOffset(instant, zone)`                             | Offset in minutes (fractional only for local mean time)                                  |
+| `isDST(instant, zone)`                                 | `false` for invalid zones                                                                |
+| `isValidTimeZone(zone)` / `canonicalizeTimeZone(zone)` | Validation and canonical names (`Asia/Calcutta` → `Asia/Kolkata`)                        |
+| `getUserTimeZone()`                                    | The runtime's zone, canonicalized, falling back to `UTC`                                 |
+| `getZoneCountries(zone)`                               | ISO country codes using the zone (`Europe/Zurich` → `CH`, `DE`, `LI`)                    |
+| `listTimeZones({ labelStyle, at, locale, country })`   | Zones sorted by offset; `labelStyle` is `original`, `offset`, `abbrev` or `altName`      |
 
 `opts` accepts `format` (pattern for `local`), `locale` and `disambiguation`.
+
+Country data comes from IANA's `zone1970.tab` with the embedded engine, and from
+`Intl.Locale#getTimeZones` with the Intl engine where the runtime supports it (not all
+browsers do; without it, countries are empty).
+
+```ts
+listTimeZones({ country: 'AU', labelStyle: 'offset' }).map(z => z.label)
+// ['(UTC+08:00) Australia/Perth', '(UTC+08:45) Australia/Eucla', …, '(UTC+10:30) Australia/Lord_Howe']
+
+interpretLocal({ year: 2024, month: 11, day: 3, hour: 1, minute: 30 }, 'America/New_York', {
+  disambiguation: 'latest',
+}).utc // '2024-11-03T06:30:00.000Z'
+```
+
+### Errors
+
+Everything clockwork-tz throws is a `TimezoneError`: invalid zones, unparseable input,
+unsupported format tokens and invalid data. `InvalidTimeError` (skipped time) and
+`AmbiguousTimeError` (repeated time) are subclasses thrown by `disambiguation: 'reject'`.
 
 ### Formatting
 
@@ -198,7 +220,9 @@ const stopTicking = onTick(now => rerender(now), 1000)
 ```
 
 Transitions are exact (to the second) with both engines. Watchers handle transitions more
-than 24.8 days away, the `setTimeout` limit. Call `cleanupAllWatchers()` on shutdown.
+than 24.8 days away, the `setTimeout` limit. `onTick` fires immediately and then on wall-clock
+boundaries (every whole second for `1000`), so clocks never drift. Call
+`cleanupAllWatchers()` on shutdown.
 
 ### Parsing
 
@@ -208,9 +232,12 @@ offset are read in `defaultTimezone` (default `UTC`), never in the host's timezo
 
 ### Lifecycle
 
-`initClockworkTZ(options)` (returns a promise once any manifest load has been attempted),
-`dispose()`, `engine()`, `tzdbVersion()`, `getStatus()`, `onDataUpdate(callback)`,
-`refreshTimezoneData()`, `setEngine(engine)` and `getCurrentEngine()`.
+`initClockworkTZ(options)` throws `TimezoneError` for invalid options (for example `data` or
+`manifestURL` without `engine: 'embedded-tzdb'`, or invalid data), leaving the current engine
+in place. Otherwise it returns a promise that settles once any manifest load has been
+attempted. Also: `dispose()` (stops auto-updates and cross-tab listening), `engine()`,
+`tzdbVersion()`, `getStatus()`, `onDataUpdate(callback)`, `refreshTimezoneData()`,
+`setEngine(engine)` and `getCurrentEngine()`.
 
 ## Unusual zones covered by the test suite
 

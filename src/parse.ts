@@ -3,8 +3,10 @@
  */
 
 import type { DateInput } from './data/types.js'
+import { TimezoneError } from './data/types.js'
 import {
   parseISODate,
+  parseOffsetSeconds,
   parseLocalISOString,
   componentsToWallMs,
   isValidISOString,
@@ -50,8 +52,6 @@ export interface ParseOptions {
   strict?: boolean
   /** Zone used to read times without an offset (default: UTC) */
   defaultTimezone?: string
-  /** Allow flexible separators (space instead of T) */
-  allowFlexible?: boolean
 }
 
 /**
@@ -63,101 +63,51 @@ export interface ParseOptions {
  * @throws Error for invalid input in strict mode
  */
 export function parse(input: string, options: ParseOptions = {}): ParseResult {
-  const { strict = true, allowFlexible = false } = options
+  const { strict = true } = options
+  const invalid = (): ParseResult => ({
+    date: new Date(NaN),
+    hasTimezone: false,
+    original: input,
+    isValid: false,
+  })
 
   if (typeof input !== 'string' || input.trim() === '') {
-    const error = new Error('Input must be a non-empty string')
     if (strict) {
-      throw error
+      throw new TimezoneError('Input must be a non-empty string')
     }
-
-    return {
-      date: new Date(NaN),
-      hasTimezone: false,
-      original: input,
-      isValid: false,
-    }
+    return invalid()
   }
 
-  const trimmedInput = input.trim()
+  const trimmed = input.trim()
 
-  // Try ISO with timezone first
-  if (isValidISOString(trimmedInput)) {
+  // ISO 8601 with an offset or Z ("T" or space between date and time)
+  if (isValidISOString(trimmed)) {
+    return { date: parseISODate(trimmed), hasTimezone: true, original: input, isValid: true }
+  }
+
+  // Wall time without an offset, or a date alone (midnight), read in the default zone
+  const local = /^-?\d{4,6}-\d{2}-\d{2}$/.test(trimmed) ? `${trimmed}T00:00` : trimmed
+  if (isValidLocalISOString(local)) {
     try {
-      const date = parseISODate(trimmedInput)
-      return {
-        date,
-        hasTimezone: true,
-        original: input,
-        isValid: !isNaN(date.getTime()),
-      }
+      const date = localToDate(local, options.defaultTimezone)
+      return { date, hasTimezone: false, original: input, isValid: true }
     } catch (error) {
       if (strict) {
-        throw new Error(`Failed to parse ISO date: ${input}`, { cause: error })
+        throw new TimezoneError(`Failed to parse "${input}"`, { cause: error })
       }
+      return invalid()
     }
-  }
-
-  // Try local ISO format
-  if (isValidLocalISOString(trimmedInput)) {
-    try {
-      const date = localToDate(trimmedInput, options.defaultTimezone)
-      return {
-        date,
-        hasTimezone: false,
-        original: input,
-        isValid: !isNaN(date.getTime()),
-      }
-    } catch (error) {
-      if (strict) {
-        throw new Error(`Failed to parse local ISO date: ${input}`, { cause: error })
-      }
-    }
-  }
-
-  // Try flexible format if allowed (space instead of T)
-  if (allowFlexible && trimmedInput.includes(' ')) {
-    const flexibleInput = trimmedInput.replace(' ', 'T')
-    if (isValidLocalISOString(flexibleInput)) {
-      try {
-        const date = localToDate(flexibleInput, options.defaultTimezone)
-        return {
-          date,
-          hasTimezone: false,
-          original: input,
-          isValid: !isNaN(date.getTime()),
-        }
-      } catch (error) {
-        if (strict) {
-          throw new Error(`Failed to parse flexible date: ${input}`, { cause: error })
-        }
-      }
-    }
-  }
-
-  // Date-only strings are midnight wall time in the default timezone
-  if (
-    /^-?\d{4,6}-\d{2}-\d{2}$/.test(trimmedInput) &&
-    isValidLocalISOString(`${trimmedInput}T00:00`)
-  ) {
-    const date = localToDate(`${trimmedInput}T00:00`, options.defaultTimezone)
-    return { date, hasTimezone: false, original: input, isValid: !isNaN(date.getTime()) }
   }
 
   // In non-strict mode, accept other formats the platform parses, but only
   // when they carry their own offset (otherwise the result depends on the host)
   if (!strict) {
-    const hasTimezone = /(?:[+-]\d{2}:?\d{2}|Z|\b(?:GMT|UTC))$/i.test(trimmedInput)
-    const date = hasTimezone ? new Date(trimmedInput) : new Date(NaN)
-    return {
-      date,
-      hasTimezone,
-      original: input,
-      isValid: !isNaN(date.getTime()),
-    }
+    const hasTimezone = /(?:[+-]\d{2}:?\d{2}|Z|\b(?:GMT|UTC))$/i.test(trimmed)
+    const date = hasTimezone ? new Date(trimmed) : new Date(NaN)
+    return { date, hasTimezone, original: input, isValid: !isNaN(date.getTime()) }
   }
 
-  throw new Error(`Invalid date format: ${input}. Expected ISO 8601 format.`)
+  throw new TimezoneError(`Invalid date format: ${input}. Expected ISO 8601.`)
 }
 
 /**
@@ -172,7 +122,7 @@ export function parseDate(input: string, options: ParseOptions = {}): Date {
   const result = parse(input, options)
 
   if (!result.isValid) {
-    throw new Error(`Invalid date: ${input}`)
+    throw new TimezoneError(`Invalid date: ${input}`)
   }
 
   return result.date
@@ -187,7 +137,7 @@ export function parseDate(input: string, options: ParseOptions = {}): Date {
  */
 export function parseComponents(input: string): DateComponents {
   if (!isValidLocalISOString(input)) {
-    throw new Error(`Invalid local ISO format: ${input}`)
+    throw new TimezoneError(`Invalid local ISO format: ${input}`)
   }
 
   return parseLocalISOString(input)
@@ -230,11 +180,7 @@ export function isParseable(input: string, options: ParseOptions = {}): boolean 
  */
 export function parseAny(
   input: string,
-  formats: ParseOptions[] = [
-    { strict: true },
-    { strict: true, allowFlexible: true },
-    { strict: false },
-  ]
+  formats: ParseOptions[] = [{ strict: true }, { strict: false }]
 ): ParseResult {
   for (const format of formats) {
     const result = safeParse(input, format)
@@ -243,7 +189,7 @@ export function parseAny(
     }
   }
 
-  throw new Error(`Unable to parse date with any format: ${input}`)
+  throw new TimezoneError(`Unable to parse date with any format: ${input}`)
 }
 
 /**
@@ -263,14 +209,14 @@ export function parseRange(
 
   const parts = input.split(separator)
   if (parts.length !== 2) {
-    throw new Error(`Invalid date range format: ${input}`)
+    throw new TimezoneError(`Invalid date range format: ${input}`)
   }
 
   const start = parseDate(parts[0]!.trim(), parseOptions)
   const end = parseDate(parts[1]!.trim(), parseOptions)
 
   if (start > end) {
-    throw new Error(`Invalid date range: start date is after end date`)
+    throw new TimezoneError(`Invalid date range: start date is after end date`)
   }
 
   return { start, end }
@@ -292,7 +238,7 @@ export function parseTime(input: string): {
   const match = timePattern.exec(input.trim())
 
   if (!match) {
-    throw new Error(`Invalid time format: ${input}`)
+    throw new TimezoneError(`Invalid time format: ${input}`)
   }
 
   const [, hourStr, minuteStr, secondStr = '0', msStr = '0'] = match
@@ -303,13 +249,13 @@ export function parseTime(input: string): {
   const millisecond = parseInt(msStr.padEnd(3, '0'), 10)
 
   if (hour < 0 || hour > 23) {
-    throw new Error(`Invalid hour: ${hour}`)
+    throw new TimezoneError(`Invalid hour: ${hour}`)
   }
   if (minute < 0 || minute > 59) {
-    throw new Error(`Invalid minute: ${minute}`)
+    throw new TimezoneError(`Invalid minute: ${minute}`)
   }
   if (second < 0 || second > 59) {
-    throw new Error(`Invalid second: ${second}`)
+    throw new TimezoneError(`Invalid second: ${second}`)
   }
 
   return { hour, minute, second, millisecond }
@@ -318,33 +264,16 @@ export function parseTime(input: string): {
 /**
  * Parse timezone offset from a string
  *
- * @param input - Offset string (e.g., "+05:30", "-08:00", "Z")
- * @returns Offset in minutes
+ * @param input - Offset string ("+05:30", "-0800", "+05", "+00:19:32", "Z" or "UTC")
+ * @returns Offset in minutes (fractional when the offset has seconds)
  */
 export function parseOffset(input: string): number {
   const trimmed = input.trim()
-
-  if (trimmed === 'Z' || trimmed.toLowerCase() === 'utc') {
+  if (trimmed.toUpperCase() === 'UTC') {
     return 0
   }
-
-  const offsetPattern = /^([+-])(\d{1,2}):?(\d{2})$/
-  const match = offsetPattern.exec(trimmed)
-
-  if (!match) {
-    throw new Error(`Invalid timezone offset format: ${input}`)
-  }
-
-  const [, sign, hourStr, minuteStr] = match
-  const hours = parseInt(hourStr!, 10)
-  const minutes = parseInt(minuteStr!, 10)
-
-  if (hours > 18 || minutes > 59) {
-    throw new Error(`Invalid timezone offset: ${input}`)
-  }
-
-  const totalMinutes = hours * 60 + minutes
-  return sign === '+' ? totalMinutes : -totalMinutes
+  // Accept single-digit hours ("+5:30") as well as the ISO forms
+  return parseOffsetSeconds(trimmed.replace(/^([+-])(\d)(?!\d)/, '$10$2')) / 60
 }
 
 /**
@@ -354,17 +283,17 @@ export function parseOffset(input: string): number {
  * @returns Normalized Date object
  */
 export function normalize(input: DateInput): Date {
-  if (input instanceof Date) {
-    return input
-  }
-
-  if (typeof input === 'number') {
-    return new Date(input)
+  if (input instanceof Date || typeof input === 'number') {
+    const date = new Date(input instanceof Date ? input.getTime() : input)
+    if (isNaN(date.getTime())) {
+      throw new TimezoneError(`Invalid date: ${String(input)}`)
+    }
+    return input instanceof Date ? input : date
   }
 
   if (typeof input === 'string') {
     return parseDate(input, { strict: false })
   }
 
-  throw new Error(`Cannot normalize input of type ${typeof input}`)
+  throw new TimezoneError(`Cannot normalize input of type ${typeof input}`)
 }

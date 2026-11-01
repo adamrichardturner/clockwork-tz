@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   clearCache,
   compareTzdbVersions,
+  dispose,
   ensureFreshTzdb,
   getCacheStats,
   getStatus,
@@ -59,6 +60,7 @@ describe('signed tzdb updates', () => {
   })
 
   afterEach(() => {
+    dispose()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -87,7 +89,7 @@ describe('signed tzdb updates', () => {
       'https://cdn.example.test/data-2030a.json',
       expect.anything()
     )
-    expect((await getCacheStats()).dataVersion).toBe('2030a')
+    expect((await getCacheStats(MANIFEST_URL, publicKey)).dataVersion).toBe('2030a')
 
     // Fresh cache: no network
     const again = await ensureFreshTzdb(MANIFEST_URL, { publicKey, fetch })
@@ -132,6 +134,55 @@ describe('signed tzdb updates', () => {
     })
     vi.useRealTimers()
     expect(result?.version).toBe('2030b')
+  })
+
+  it('keeps caches separate per manifest and key', async () => {
+    const { manifest, body } = release('2030a', privateKey)
+    await ensureFreshTzdb(MANIFEST_URL, { publicKey, fetch: mockFetch(manifest, body) })
+    expect((await getCacheStats(MANIFEST_URL, publicKey)).dataCached).toBe(true)
+    expect((await getCacheStats(MANIFEST_URL, keyPair().publicKey)).dataCached).toBe(false)
+    expect((await getCacheStats('https://other.test/manifest.json', publicKey)).dataCached).toBe(
+      false
+    )
+    await clearCache(MANIFEST_URL, publicKey)
+    expect((await getCacheStats(MANIFEST_URL, publicKey)).dataCached).toBe(false)
+  })
+
+  it('passes a timeout signal to fetch', async () => {
+    const { manifest, body } = release('2030a', privateKey)
+    const fetch = mockFetch(manifest, body)
+    await ensureFreshTzdb(MANIFEST_URL, { publicKey, fetch })
+    for (const call of fetch.mock.calls) {
+      expect((call as unknown[])[1]).toMatchObject({ signal: expect.any(AbortSignal) })
+    }
+  })
+
+  it('loads data another tab verified', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('offline')
+      })
+    )
+    await initClockworkTZ({
+      engine: 'embedded-tzdb',
+      data: tzdb,
+      manifestURL: MANIFEST_URL,
+      publicKey,
+      autoUpdateIntervalMs: 0,
+    })
+    expect(tzdbVersion()).toBe(tzdb.version)
+    const seen: string[] = []
+    const stop = onDataUpdate(version => seen.push(version))
+
+    // Another tab fetches, verifies, caches and broadcasts
+    const { manifest, body } = release('2030c', privateKey)
+    await ensureFreshTzdb(MANIFEST_URL, { publicKey, fetch: mockFetch(manifest, body) })
+
+    await vi.waitFor(() => expect(tzdbVersion()).toBe('2030c'))
+    expect(seen).toEqual(['2030c'])
+    stop()
+    dispose()
   })
 
   it('initialises the embedded engine from a manifest and notifies listeners', async () => {

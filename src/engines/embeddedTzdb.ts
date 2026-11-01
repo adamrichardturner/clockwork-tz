@@ -95,6 +95,8 @@ export class EmbeddedTzdbEngine implements LoadableEngine {
   private records = new Map<string, ZoneRecord>()
   /** Lower-cased identifier to canonical zone name */
   private lookup = new Map<string, string>()
+  /** Lower-cased identifier to the listed spelling users know (e.g. "UTC") */
+  private listedNames = new Map<string, string>()
 
   constructor(data?: unknown) {
     if (data !== undefined) {
@@ -121,6 +123,7 @@ export class EmbeddedTzdbEngine implements LoadableEngine {
     }
     this.data = data
     this.lookup = lookup
+    this.listedNames = new Map(data.listed.map(zone => [zone.toLowerCase(), zone]))
     this.records = new Map()
   }
 
@@ -133,16 +136,19 @@ export class EmbeddedTzdbEngine implements LoadableEngine {
   }
 
   canonicalize(zone: string): string {
-    const canonical = this.lookup.get(String(zone).toLowerCase())
+    const key = String(zone).toLowerCase()
+    const canonical = this.lookup.get(key)
     if (!canonical) {
       throw new TimezoneError(this.data ? `Invalid timezone: ${zone}` : this.noDataMessage())
     }
-    // Present the identifier users know: keep "UTC" rather than "Etc/UTC"
-    const exact = Object.keys(this.data!.links).find(l => l.toLowerCase() === zone.toLowerCase())
-    if (exact && this.data!.listed.includes(exact)) {
-      return exact
-    }
-    return canonical
+    // Present listed identifiers as listed: "utc" -> "UTC" rather than "Etc/UTC"
+    return this.listedNames.get(key) ?? canonical
+  }
+
+  getCountryCodes(zone: string): string[] {
+    this.record(zone)
+    const canonical = this.lookup.get(String(zone).toLowerCase())!
+    return [...(this.data?.countries?.[canonical] ?? [])]
   }
 
   listZoneIds(): string[] {

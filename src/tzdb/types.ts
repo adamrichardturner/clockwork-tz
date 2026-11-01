@@ -28,4 +28,6 @@ export interface TzdbData {
   links: Record<string, string>
   /** Identifiers suitable for user-facing lists (zone1970.tab plus UTC) */
   listed: string[]
+  /** ISO 3166 country codes per zone, from zone1970.tab */
+  countries?: Record<string, string[]>
 }

@@ -12,6 +12,7 @@ import {
   parseRange,
   parseTime,
   safeParse,
+  TimezoneError,
 } from '../src/index.js'
 
 describe('ISO parsing', () => {
@@ -49,8 +50,13 @@ describe('ISO parsing', () => {
     expect(isValidISOString('2023-02-29T00:00:00Z')).toBe(false)
     expect(isValidLocalISOString('2024-13-01T00:00:00')).toBe(false)
     expect(isValidLocalISOString('2024-01-01T24:00:00')).toBe(false)
-    expect(() => parseDate('2023-02-29T00:00:00Z')).toThrow()
-    expect(() => parse('not a date')).toThrow()
+    expect(() => parseDate('2023-02-29T00:00:00Z')).toThrow(TimezoneError)
+    expect(() => parse('not a date')).toThrow(TimezoneError)
+    expect(() => parse('')).toThrow(TimezoneError)
+    expect(parse('', { strict: false }).isValid).toBe(false)
+    expect(() => parse('2024-07-15T10:00:00', { defaultTimezone: 'Not/AZone' })).toThrow(
+      TimezoneError
+    )
     expect(safeParse('not a date')?.isValid).toBe(false)
     expect(isParseable('not a date')).toBe(false)
   })
@@ -60,13 +66,13 @@ describe('ISO parsing', () => {
       '2024-07-15T14:00:00.000Z'
     )
     expect(parse('July 15 2024', { strict: false }).isValid).toBe(false)
-    expect(parseAny('2024-07-15 14:00:00', [{ strict: true, allowFlexible: true }]).isValid).toBe(
-      true
-    )
+    expect(parseAny('2024-07-15 14:00:00').isValid).toBe(true)
   })
 
   it('normalizes dates, numbers and strings', () => {
     expect(normalize(0).toISOString()).toBe('1970-01-01T00:00:00.000Z')
+    expect(() => normalize(NaN)).toThrow(TimezoneError)
+    expect(() => normalize(new Date('nope'))).toThrow(TimezoneError)
     const d = new Date()
     expect(normalize(d)).toBe(d)
     expect(normalize('2024-07-15T14:00:00Z').getTime()).toBe(Date.UTC(2024, 6, 15, 14))
@@ -88,5 +94,10 @@ describe('ISO parsing', () => {
     expect(parseOffset('+05:45')).toBe(345)
     expect(parseOffset('-0930')).toBe(-570)
     expect(parseOffset('Z')).toBe(0)
+    expect(parseOffset('UTC')).toBe(0)
+    expect(parseOffset('+5:30')).toBe(330)
+    expect(parseOffset('+05')).toBe(300)
+    expect(parseOffset('+00:19:32')).toBeCloseTo(19 + 32 / 60, 10)
+    expect(() => parseOffset('+25:00')).toThrow(TimezoneError)
   })
 })

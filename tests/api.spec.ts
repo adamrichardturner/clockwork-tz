@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createEmbeddedTzdbEngine,
   dispose,
@@ -8,11 +8,14 @@ import {
   getCurrentEngine,
   getStatus,
   getUserTimeZone,
+  formatWithPattern,
   initClockworkTZ,
+  interpretLocal,
   isDST,
   refreshTimezoneData,
   setEngine,
   TimezoneError,
+  tzdbVersion,
   VERSION,
 } from '../src/index.js'
 import { tzdb, TZDB_VERSION } from '../src/tzdb.js'
@@ -49,9 +52,52 @@ describe('API', () => {
     await expect(refreshTimezoneData()).rejects.toThrow(TimezoneError)
   })
 
-  it('rejects invalid data and engines', () => {
+  it('rejects invalid data, engines and option combinations', async () => {
     expect(() => createEmbeddedTzdbEngine({ version: 1 })).toThrow(TimezoneError)
     expect(() => initClockworkTZ({ engine: 'nope' as never })).toThrow(TimezoneError)
+    expect(() => initClockworkTZ({ data: tzdb })).toThrow(/embedded-tzdb/)
+    expect(() => initClockworkTZ({ manifestURL: 'https://example.test/m.json' })).toThrow(
+      /embedded-tzdb/
+    )
+    expect(() =>
+      initClockworkTZ({ engine: 'embedded-tzdb', data: tzdb, autoUpdateIntervalMs: -1 })
+    ).toThrow(TimezoneError)
+  })
+
+  it('leaves the current engine in place when new data is invalid', async () => {
+    await initClockworkTZ({ engine: 'embedded-tzdb', data: tzdb })
+    expect(() => initClockworkTZ({ engine: 'embedded-tzdb', data: { nope: true } })).toThrow(
+      TimezoneError
+    )
+    expect(tzdbVersion()).toBe(TZDB_VERSION)
+  })
+
+  it('resets lastUpdate when switching engines', async () => {
+    await initClockworkTZ({ engine: 'embedded-tzdb', data: tzdb })
+    expect(getStatus().lastUpdate).toBeInstanceOf(Date)
+    await initClockworkTZ()
+    expect(getStatus().lastUpdate).toBeUndefined()
+  })
+
+  it('canonicalizes the user timezone', async () => {
+    await initClockworkTZ()
+    const spy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ timeZone: 'Asia/Calcutta' } as Intl.ResolvedDateTimeFormatOptions)
+    try {
+      expect(getUserTimeZone()).toBe('Asia/Kolkata')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('throws TimezoneError for every kind of bad input', async () => {
+    await initClockworkTZ()
+    expect(() => fromUTC('not a date', 'UTC')).toThrow(TimezoneError)
+    expect(() => fromUTC(NaN, 'UTC')).toThrow(TimezoneError)
+    expect(() => fromUTC('2024-07-15T10:00:00', 'UTC')).toThrow(TimezoneError)
+    expect(() => interpretLocal('2024-07-15T10:00:00', 'Not/AZone')).toThrow(TimezoneError)
+    expect(() => formatWithPattern(0, 'UTC', 'nope' as never)).toThrow(TimezoneError)
   })
 
   it('allows a custom engine', async () => {

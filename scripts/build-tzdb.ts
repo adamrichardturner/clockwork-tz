@@ -11,7 +11,7 @@
  *   src/tzdb/data.generated.ts             bundled snapshot for `clockwork-tz/tzdb`
  */
 
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -20,6 +20,55 @@ import type { CompactZone, TzdbData } from '../src/tzdb/types.ts'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const RELEASES = 'https://data.iana.org/time-zones/releases'
+
+/** Fingerprint of the key that signs tz releases (Paul Eggert) */
+const TZ_SIGNING_KEY = '7E3792A9D8ACF7D633BC1588ED97E90E62AA7E34'
+const KEYSERVER = 'hkps://keyserver.ubuntu.com'
+
+function hasGpg(): boolean {
+  return spawnSync('gpg', ['--version'], { stdio: 'ignore' }).status === 0
+}
+
+/**
+ * Verify each tarball against its detached .asc signature from IANA, made by
+ * the pinned tz signing key. Required when TZDB_REQUIRE_SIGNATURE=1 (CI);
+ * skipped with a warning when gpg is not installed otherwise.
+ */
+async function verifySignatures(work: string, files: string[]): Promise<void> {
+  if (!hasGpg()) {
+    if (process.env.TZDB_REQUIRE_SIGNATURE === '1') {
+      throw new Error('gpg is required to verify tzdb downloads (TZDB_REQUIRE_SIGNATURE=1)')
+    }
+    console.warn('gpg not found: skipping signature verification of tzdb downloads')
+    return
+  }
+
+  const home = join(work, 'gnupg')
+  mkdirSync(home, { mode: 0o700 })
+  execFileSync(
+    'gpg',
+    ['--homedir', home, '--batch', '--keyserver', KEYSERVER, '--recv-keys', TZ_SIGNING_KEY],
+    {
+      stdio: 'inherit',
+    }
+  )
+
+  for (const file of files) {
+    await download(`${RELEASES}/${file}.asc`, join(work, `${file}.asc`))
+    const result = spawnSync(
+      'gpg',
+      ['--homedir', home, '--batch', '--status-fd', '1', '--verify', `${file}.asc`, file],
+      { cwd: work, encoding: 'utf8' }
+    )
+    const valid = result.stdout
+      .split('\n')
+      .some(line => line.startsWith('[GNUPG:] VALIDSIG ') && line.includes(TZ_SIGNING_KEY))
+    if (result.status !== 0 || !valid) {
+      throw new Error(`Signature verification failed for ${file}:\n${result.stderr}`)
+    }
+    console.log(`Verified ${file}`)
+  }
+}
 
 async function download(url: string, dest: string): Promise<void> {
   const response = await fetch(url)
@@ -67,8 +116,12 @@ async function main(): Promise<void> {
 
   const work = mkdtempSync(join(tmpdir(), 'clockwork-tzdb-'))
   try {
-    for (const name of [`tzcode${version}.tar.gz`, `tzdata${version}.tar.gz`]) {
+    const tarballs = [`tzcode${version}.tar.gz`, `tzdata${version}.tar.gz`]
+    for (const name of tarballs) {
       await download(`${RELEASES}/${name}`, join(work, name))
+    }
+    await verifySignatures(work, tarballs)
+    for (const name of tarballs) {
       execFileSync('tar', ['-xzf', name], { cwd: work })
     }
 
@@ -94,12 +147,15 @@ async function main(): Promise<void> {
       }
     }
 
+    // zone1970.tab: country codes, coordinates, zone, comment
     const listed = new Set<string>(['UTC'])
+    const countries: Record<string, string[]> = {}
     for (const line of readFileSync(join(work, 'zone1970.tab'), 'utf8').split('\n')) {
       if (line && !line.startsWith('#')) {
-        const zone = line.split('\t')[2]
-        if (zone) {
+        const [codes, , zone] = line.split('\t')
+        if (zone && codes) {
           listed.add(zone)
+          countries[zone] = codes.split(',')
         }
       }
     }
@@ -126,6 +182,11 @@ async function main(): Promise<void> {
       zones,
       links: Object.fromEntries(Object.entries(links).sort(([a], [b]) => a.localeCompare(b))),
       listed: [...listed].filter(zone => zone in zones || zone in links).sort(),
+      countries: Object.fromEntries(
+        Object.entries(countries)
+          .filter(([zone]) => zone in zones)
+          .sort(([a], [b]) => a.localeCompare(b))
+      ),
     }
 
     const json = JSON.stringify(data)

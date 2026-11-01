@@ -28,7 +28,27 @@ export const BROADCAST_CHANNEL_NAME = 'clockwork-tz-updates'
  */
 const TZDB_CACHE_TTL = 24 * 60 * 60 * 1000
 
-const DATA_CACHE_KEY = `${CACHE_KEY_PREFIX}data`
+/** Abort manifest and data requests that take longer than this */
+const FETCH_TIMEOUT_MS = 30_000
+
+/**
+ * Data is cached per manifest URL and public key, so data verified for one
+ * source is never served for another
+ */
+export function cacheKey(manifestURL: string, publicKey: string = DEFAULT_PUBLIC_KEY): string {
+  return `${CACHE_KEY_PREFIX}data:${publicKey}:${manifestURL}`
+}
+
+function timeoutSignal(): AbortSignal | undefined {
+  return typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    : undefined
+}
+
+function requestInit(init: RequestInit): RequestInit {
+  const signal = timeoutSignal()
+  return signal ? { ...init, signal } : init
+}
 
 export interface EnsureFreshOptions {
   /** Base64 raw Ed25519 public key (default: DEFAULT_PUBLIC_KEY) */
@@ -117,9 +137,9 @@ export async function verifyManifestSignature(
   }
 }
 
-async function readCache(): Promise<CachedTzdbData | null> {
+async function readCache(key: string): Promise<CachedTzdbData | null> {
   try {
-    const raw = await getCacheStorage().get(DATA_CACHE_KEY)
+    const raw = await getCacheStorage().get(key)
     if (!raw) {
       return null
     }
@@ -130,9 +150,9 @@ async function readCache(): Promise<CachedTzdbData | null> {
   }
 }
 
-async function writeCache(entry: CachedTzdbData): Promise<void> {
+async function writeCache(key: string, entry: CachedTzdbData): Promise<void> {
   try {
-    await getCacheStorage().set(DATA_CACHE_KEY, JSON.stringify(entry))
+    await getCacheStorage().set(key, JSON.stringify(entry))
   } catch {
     // Cache is best effort
   }
@@ -150,7 +170,9 @@ export async function ensureFreshTzdb(
   options: EnsureFreshOptions = {}
 ): Promise<{ version: string; data: unknown } | null> {
   const fetchImpl = options.fetch ?? globalThis.fetch
-  const cached = await readCache()
+  const publicKey = options.publicKey ?? DEFAULT_PUBLIC_KEY
+  const key = cacheKey(manifestURL, publicKey)
+  const cached = await readCache(key)
   const fallback = cached ? { version: cached.version, data: cached.data } : null
 
   if (cached && Date.now() - cached.cachedAt < TZDB_CACHE_TTL) {
@@ -158,10 +180,10 @@ export async function ensureFreshTzdb(
   }
 
   try {
-    const manifestResponse = await fetchImpl(manifestURL, {
-      headers: { Accept: 'application/json' },
-      cache: 'no-cache',
-    })
+    const manifestResponse = await fetchImpl(
+      manifestURL,
+      requestInit({ headers: { Accept: 'application/json' }, cache: 'no-cache' })
+    )
     if (!manifestResponse.ok) {
       throw new Error(`Manifest request failed: HTTP ${manifestResponse.status}`)
     }
@@ -171,16 +193,19 @@ export async function ensureFreshTzdb(
     }
 
     if (cached && compareTzdbVersions(manifest.version, cached.version) <= 0) {
-      await writeCache({ ...cached, cachedAt: Date.now() })
+      await writeCache(key, { ...cached, cachedAt: Date.now() })
       return fallback
     }
 
-    if (!(await verifyManifestSignature(manifest, options.publicKey))) {
+    if (!(await verifyManifestSignature(manifest, publicKey))) {
       throw new Error(`Manifest signature verification failed for ${manifest.version}`)
     }
 
     const dataUrl = new URL(manifest.dataUrl, manifestURL).toString()
-    const dataResponse = await fetchImpl(dataUrl, { headers: { Accept: 'application/json' } })
+    const dataResponse = await fetchImpl(
+      dataUrl,
+      requestInit({ headers: { Accept: 'application/json' } })
+    )
     if (!dataResponse.ok) {
       throw new Error(`Data request failed: HTTP ${dataResponse.status}`)
     }
@@ -200,8 +225,8 @@ export async function ensureFreshTzdb(
       throw new Error('Timezone data version does not match manifest')
     }
 
-    await writeCache({ version: manifest.version, cachedAt: Date.now(), data })
-    broadcastUpdate(manifest.version)
+    await writeCache(key, { version: manifest.version, cachedAt: Date.now(), data })
+    broadcastUpdate(manifest.version, key)
 
     return { version: manifest.version, data }
   } catch (error) {
@@ -213,13 +238,13 @@ export async function ensureFreshTzdb(
 /**
  * Broadcast timezone data update to other tabs/workers
  */
-function broadcastUpdate(version: string): void {
+function broadcastUpdate(version: string, source: string): void {
   const channel = createBroadcastChannel(BROADCAST_CHANNEL_NAME)
   if (!channel) {
     return
   }
   try {
-    channel.postMessage({ type: 'tzdb-update', version, timestamp: Date.now() })
+    channel.postMessage({ type: 'tzdb-update', version, source, timestamp: Date.now() })
   } catch (error) {
     console.warn('Failed to broadcast timezone update:', error)
   } finally {
@@ -228,18 +253,23 @@ function broadcastUpdate(version: string): void {
 }
 
 /**
- * Listen for timezone data updates from other tabs/workers
+ * Listen for timezone data verified and cached by other tabs/workers. The
+ * callback receives the version and an opaque source id (manifest + key).
  */
-export function onDataUpdate(callback: (version: string) => void): () => void {
+export function onBroadcastUpdate(callback: (version: string, source: string) => void): () => void {
   const channel = createBroadcastChannel(BROADCAST_CHANNEL_NAME)
   if (!channel) {
     return () => {}
   }
 
   channel.addEventListener('message', event => {
-    const message = event.data as { type?: unknown; version?: unknown } | null
-    if (message?.type === 'tzdb-update' && typeof message.version === 'string') {
-      callback(message.version)
+    const message = event.data as { type?: unknown; version?: unknown; source?: unknown } | null
+    if (
+      message?.type === 'tzdb-update' &&
+      typeof message.version === 'string' &&
+      typeof message.source === 'string'
+    ) {
+      callback(message.version, message.source)
     }
   })
 
@@ -253,25 +283,40 @@ export function onDataUpdate(callback: (version: string) => void): () => void {
 }
 
 /**
- * Clear all cached timezone data
+ * Clear cached timezone data, for one manifest or (by default) all of them
  */
-export async function clearCache(): Promise<void> {
+export async function clearCache(
+  manifestURL?: string,
+  publicKey: string = DEFAULT_PUBLIC_KEY
+): Promise<void> {
+  const storage = getCacheStorage()
   try {
-    await getCacheStorage().delete(DATA_CACHE_KEY)
+    if (manifestURL) {
+      await storage.delete(cacheKey(manifestURL, publicKey))
+      return
+    }
+    for (const key of await storage.keys()) {
+      if (key.startsWith(`${CACHE_KEY_PREFIX}data:`)) {
+        await storage.delete(key)
+      }
+    }
   } catch (error) {
     console.warn('Failed to clear timezone cache:', error)
   }
 }
 
 /**
- * Get cache statistics
+ * Get cache statistics for a manifest (default: the official one)
  */
-export async function getCacheStats(): Promise<{
+export async function getCacheStats(
+  manifestURL: string = DEFAULT_MANIFEST_URL,
+  publicKey: string = DEFAULT_PUBLIC_KEY
+): Promise<{
   dataCached: boolean
   dataVersion?: string | undefined
   dataAge?: number | undefined
 }> {
-  const cached = await readCache()
+  const cached = await readCache(cacheKey(manifestURL, publicKey))
   if (!cached) {
     return { dataCached: false }
   }

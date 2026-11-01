@@ -16,6 +16,7 @@ export {
   interpretLocal,
   convert,
   getZoneInfo,
+  getZoneCountries,
   getOffset,
   isDST,
   listTimeZones,
@@ -28,6 +29,7 @@ export {
   refreshTimezoneData,
   getStatus,
 } from './api.js'
+export type { WallTime } from './api.js'
 
 export type {
   EngineKind,
@@ -47,12 +49,7 @@ export type {
   TzdbManifest,
 } from './data/types.js'
 
-export {
-  TimezoneError,
-  AmbiguousTimeError,
-  InvalidTimeError,
-  NotImplementedError,
-} from './data/types.js'
+export { TimezoneError, AmbiguousTimeError, InvalidTimeError } from './data/types.js'
 
 export {
   format,
