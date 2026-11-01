@@ -31,36 +31,56 @@ function localToDate(input: string, zone: string | undefined): Date {
 }
 
 /**
- * Parse result with metadata
+ * The result of {@link parse}: the instant, plus whether the input carried its
+ * own offset.
  */
 export interface ParseResult {
-  /** Parsed date */
+  /** The instant; an invalid `Date` when `isValid` is false */
   date: Date
-  /** Whether the input had timezone information */
+  /** Whether the input carried its own offset or `Z` (otherwise it was read in `defaultTimezone`) */
   hasTimezone: boolean
-  /** Original input string */
+  /** The input as given */
   original: string
-  /** Whether the date is valid */
+  /** Whether parsing produced a real date (always true in strict mode, which throws instead) */
   isValid: boolean
 }
 
 /**
- * Parsing options
+ * Options for {@link parse} and the other parsing functions.
  */
 export interface ParseOptions {
-  /** Strict mode - reject non-ISO formats */
+  /** Throw on anything that isn't ISO 8601 (default `true`). When `false`, return `isValid: false` instead, and accept other platform-parseable strings that carry an offset. */
   strict?: boolean
-  /** Zone used to read times without an offset (default: UTC) */
+  /** Zone used to read wall times and plain dates (default `'UTC'`); never the host's zone */
   defaultTimezone?: string
 }
 
 /**
- * Parse a date string with validation and metadata
+ * Parse an ISO 8601 date-time strictly, never using the host's timezone.
  *
- * @param input - Date string to parse
- * @param options - Parsing options
- * @returns Parse result with date and metadata
- * @throws Error for invalid input in strict mode
+ * Accepted forms:
+ * - With an offset or `Z` (an instant): `2024-07-15T14:00:00Z`, `2024-07-15 14:00+05:45`,
+ *   `…+0545`, `…-03`, `…+00:19:32`, with 1–9 fractional digits
+ * - Without an offset (a wall time), read in `defaultTimezone` (default `'UTC'`):
+ *   `2024-07-15T14:00`, `2024-07-15 14:00:00.123`
+ * - A date alone, as midnight in `defaultTimezone`: `2024-07-15`
+ *
+ * With `strict: false`, other formats the platform can parse are accepted only
+ * when they carry their own offset (`'Mon, 15 Jul 2024 14:00:00 GMT'`), and
+ * failures return `isValid: false` instead of throwing.
+ *
+ * @param input - The string to parse.
+ * @param options - `strict` (default `true`) and `defaultTimezone`.
+ * @throws {@link TimezoneError} in strict mode for unparseable or impossible
+ *   dates (such as 30 February) or an invalid `defaultTimezone`.
+ *
+ * @example
+ * ```ts
+ * parse('2024-07-15T14:00:00+05:45').date.toISOString() // '2024-07-15T08:15:00.000Z'
+ * parse('2024-07-15T14:00:00', { defaultTimezone: 'Asia/Kathmandu' }).hasTimezone // false
+ * ```
+ *
+ * @see {@link https://clockworktz.dev/docs/parsing | Parsing}
  */
 export function parse(input: string, options: ParseOptions = {}): ParseResult {
   const { strict = true } = options
@@ -111,12 +131,14 @@ export function parse(input: string, options: ParseOptions = {}): ParseResult {
 }
 
 /**
- * Parse a date string and return only the Date object
+ * Like {@link parse}, but returns just the `Date`.
  *
- * @param input - Date string to parse
- * @param options - Parsing options
- * @returns Parsed Date object
- * @throws Error for invalid input
+ * @throws {@link TimezoneError} if the input can't be parsed, even with `strict: false`.
+ *
+ * @example
+ * ```ts
+ * parseDate('2024-07-15', { defaultTimezone: 'America/New_York' }).toISOString() // '2024-07-15T04:00:00.000Z'
+ * ```
  */
 export function parseDate(input: string, options: ParseOptions = {}): Date {
   const result = parse(input, options)
@@ -129,11 +151,15 @@ export function parseDate(input: string, options: ParseOptions = {}): Date {
 }
 
 /**
- * Parse date components from a string
+ * Split a wall-time string (no offset) into its fields, without reading it in
+ * any zone. `month` is 1–12.
  *
- * @param input - Local date string (without timezone)
- * @returns Date components
- * @throws Error for invalid input
+ * @throws {@link TimezoneError} for an invalid or impossible wall time.
+ *
+ * @example
+ * ```ts
+ * parseComponents('2024-07-15T14:30:05.250') // { year: 2024, month: 7, day: 15, hour: 14, minute: 30, second: 5, millisecond: 250 }
+ * ```
  */
 export function parseComponents(input: string): DateComponents {
   if (!isValidLocalISOString(input)) {
@@ -144,11 +170,15 @@ export function parseComponents(input: string): DateComponents {
 }
 
 /**
- * Safely parse a date string without throwing
+ * Like {@link parse} with `strict: false`: never throws, and reports failures
+ * with `isValid: false`.
  *
- * @param input - Date string to parse
- * @param options - Parsing options
- * @returns Parse result or null if parsing failed
+ * @returns The parse result, or `null` only for unexpected errors.
+ *
+ * @example
+ * ```ts
+ * safeParse('not a date')?.isValid // false
+ * ```
  */
 export function safeParse(input: string, options: ParseOptions = {}): ParseResult | null {
   try {
@@ -159,11 +189,13 @@ export function safeParse(input: string, options: ParseOptions = {}): ParseResul
 }
 
 /**
- * Check if a string can be parsed as a date
+ * Whether {@link safeParse} can parse a string into a valid date.
  *
- * @param input - String to test
- * @param options - Parsing options
- * @returns True if parseable
+ * @example
+ * ```ts
+ * isParseable('2024-07-15T14:00:00Z') // true
+ * isParseable('July 15') // false
+ * ```
  */
 export function isParseable(input: string, options: ParseOptions = {}): boolean {
   const result = safeParse(input, options)
@@ -171,12 +203,10 @@ export function isParseable(input: string, options: ParseOptions = {}): boolean 
 }
 
 /**
- * Parse multiple date formats and return the first successful one
+ * Try several {@link ParseOptions} in turn and return the first valid result.
  *
- * @param input - Date string to parse
- * @param formats - Array of format options to try
- * @returns First successful parse result
- * @throws Error if none of the formats work
+ * @param formats - Options to try (default: strict, then non-strict).
+ * @throws {@link TimezoneError} if none of them parses the input.
  */
 export function parseAny(
   input: string,
@@ -193,11 +223,17 @@ export function parseAny(
 }
 
 /**
- * Parse a date range from a string
+ * Parse a range written as `<start> to <end>` (or separated by `–`, `—` or `-`
+ * with spaces around it).
  *
- * @param input - Range string (e.g., "2024-01-01 to 2024-01-31")
- * @param options - Parsing options
- * @returns Object with start and end dates
+ * @param options - Parse options, plus `separator` (string or RegExp).
+ * @returns The start and end as `Date`s.
+ * @throws {@link TimezoneError} if either end is invalid, or the start is after the end.
+ *
+ * @example
+ * ```ts
+ * parseRange('2024-01-01T00:00:00Z to 2024-01-31T00:00:00Z').end.toISOString() // '2024-01-31T00:00:00.000Z'
+ * ```
  */
 export function parseRange(
   input: string,
@@ -223,10 +259,14 @@ export function parseRange(
 }
 
 /**
- * Parse a time-only string (HH:mm:ss format)
+ * Parse a time of day: `H:mm`, `HH:mm:ss` or `HH:mm:ss.SSS`.
  *
- * @param input - Time string
- * @returns Object with hour, minute, second
+ * @throws {@link TimezoneError} for an invalid format or out-of-range field.
+ *
+ * @example
+ * ```ts
+ * parseTime('9:05') // { hour: 9, minute: 5, second: 0, millisecond: 0 }
+ * ```
  */
 export function parseTime(input: string): {
   hour: number
@@ -262,10 +302,17 @@ export function parseTime(input: string): {
 }
 
 /**
- * Parse timezone offset from a string
+ * Parse a UTC offset into minutes: `±HH:mm`, `±HHmm`, `±HH`, `±H:mm`,
+ * `±HH:mm:ss`, `Z` or `UTC`.
  *
- * @param input - Offset string ("+05:30", "-0800", "+05", "+00:19:32", "Z" or "UTC")
- * @returns Offset in minutes (fractional when the offset has seconds)
+ * @returns The offset in minutes; fractional when it has seconds.
+ * @throws {@link TimezoneError} for an invalid offset.
+ *
+ * @example
+ * ```ts
+ * parseOffset('+05:45') // 345
+ * parseOffset('-0930') // -570
+ * ```
  */
 export function parseOffset(input: string): number {
   const trimmed = input.trim()
@@ -277,10 +324,11 @@ export function parseOffset(input: string): number {
 }
 
 /**
- * Normalize various date inputs to a consistent Date object
+ * Turn any accepted input into a `Date`: a `Date` is returned as-is, a number is
+ * epoch milliseconds, and a string goes through {@link parseDate} with
+ * `strict: false`.
  *
- * @param input - Date, string, or number input
- * @returns Normalized Date object
+ * @throws {@link TimezoneError} for an invalid date or number, or an unparseable string.
  */
 export function normalize(input: DateInput): Date {
   if (input instanceof Date || typeof input === 'number') {

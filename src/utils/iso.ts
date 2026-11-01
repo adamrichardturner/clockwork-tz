@@ -24,7 +24,7 @@ const ISO_DATE_PATTERN = new RegExp(`^${DATE_TIME}(Z|z|[+-]\\d{2}(?::?\\d{2}(?::
 const LOCAL_ISO_PATTERN = new RegExp(`^${DATE_TIME}$`)
 
 /**
- * Date component structure
+ * A wall-clock date and time as fields. `month` is 1–12.
  */
 export interface DateComponents {
   year: number
@@ -90,7 +90,15 @@ export function parseISODate(isoString: string): Date {
 }
 
 /**
- * Validate an ISO 8601 date string format (with offset)
+ * Whether a string is a valid ISO 8601 instant: a date-time with an offset or
+ * `Z`, and real calendar values. Never throws.
+ *
+ * @example
+ * ```ts
+ * isValidISOString('2024-07-15T14:00:00+05:45') // true
+ * isValidISOString('2024-07-15T14:00:00') // false
+ * isValidISOString('2023-02-29T00:00:00Z') // false
+ * ```
  */
 export function isValidISOString(isoString: string): boolean {
   if (typeof isoString !== 'string') {
@@ -101,7 +109,15 @@ export function isValidISOString(isoString: string): boolean {
 }
 
 /**
- * Validate a local ISO string format (without timezone)
+ * Whether a string is a valid wall time: an ISO 8601 date-time without an
+ * offset (`T` or a space; seconds and fraction optional) and real calendar
+ * values. Never throws.
+ *
+ * @example
+ * ```ts
+ * isValidLocalISOString('2024-07-15 14:00') // true
+ * isValidLocalISOString('2024-07-15T14:00:00Z') // false
+ * ```
  */
 export function isValidLocalISOString(localString: string): boolean {
   if (typeof localString !== 'string') {

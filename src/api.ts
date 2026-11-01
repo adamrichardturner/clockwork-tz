@@ -46,7 +46,13 @@ import {
 } from './utils/iso.js'
 
 /**
- * A wall-clock time as fields; omitted time fields default to zero
+ * A wall-clock time as fields, for {@link interpretLocal}. `month` is 1–12;
+ * omitted time fields default to zero.
+ *
+ * @example
+ * ```ts
+ * const wall: WallTime = { year: 2024, month: 11, day: 3, hour: 1, minute: 30 }
+ * ```
  */
 export type WallTime = Pick<DateComponents, 'year' | 'month' | 'day'> &
   Partial<Omit<DateComponents, 'year' | 'month' | 'day'>>
@@ -90,12 +96,29 @@ async function loadFromManifest(manifestURL: string, publicKey?: string): Promis
 }
 
 /**
- * Initialize clockworktz with options. Calling it again replaces the engine,
- * any auto-update schedule and cross-tab listener.
+ * Choose the timezone engine and, optionally, signed tzdb updates.
  *
- * Throws TimezoneError synchronously for invalid options or data. Otherwise
- * the returned promise settles once the initial manifest load (if any) has
- * been attempted; it never rejects, and failures keep the current data.
+ * Calling this is optional: without it, the `system-intl` engine (the runtime's
+ * own timezone data) is used. Calling it again replaces the engine, the update
+ * schedule and the cross-tab listener.
+ *
+ * @param opts - Engine and data options; see {@link ClockworkOptions}.
+ * @returns A promise that settles once the first manifest download (if any) has
+ *   been attempted. It never rejects: a failed update keeps the current data.
+ * @throws {@link TimezoneError} synchronously for an unknown engine, invalid
+ *   `data`, `data` or `manifestURL` without `engine: 'embedded-tzdb'`, or a
+ *   negative `autoUpdateIntervalMs`. The current engine is left unchanged.
+ *
+ * @example
+ * ```ts
+ * import { initClockworkTZ, DEFAULT_MANIFEST_URL } from 'clockworktz'
+ * import { tzdb } from 'clockworktz/tzdb'
+ *
+ * // Deterministic results from the bundled IANA data, kept fresh from the CDN
+ * await initClockworkTZ({ engine: 'embedded-tzdb', data: tzdb, manifestURL: DEFAULT_MANIFEST_URL })
+ * ```
+ *
+ * @see {@link https://clockworktz.dev/docs/engines | Engines & tzdb data}
  */
 export function initClockworkTZ(opts: ClockworkOptions = {}): Promise<void> {
   const {
@@ -156,7 +179,9 @@ export function initClockworkTZ(opts: ClockworkOptions = {}): Promise<void> {
 }
 
 /**
- * Stop auto-updates and cross-tab listening started by initClockworkTZ
+ * Stop the auto-update timer and cross-tab listener started by
+ * {@link initClockworkTZ}, for example on server shutdown or in test teardown.
+ * The current engine and its data stay in place.
  */
 export function dispose(): void {
   if (updateTimer) {
@@ -170,22 +195,32 @@ export function dispose(): void {
 }
 
 /**
- * Get the current engine type
+ * The engine in use: `'system-intl'` (the default) or `'embedded-tzdb'`.
  */
 export function engine(): EngineKind {
   return getEngine().kind
 }
 
 /**
- * Get the current TZDB version (if available)
+ * The IANA tzdb release the engine uses, such as `'2026f'`.
+ *
+ * @returns The release for `embedded-tzdb`, or `undefined` for `system-intl`,
+ *   whose data comes from the runtime (ICU).
  */
 export function tzdbVersion(): string | undefined {
   return getEngine().getVersion()
 }
 
 /**
- * The runtime's timezone, canonicalized ("Asia/Calcutta" -> "Asia/Kolkata");
- * falls back to UTC when it cannot be determined
+ * The runtime's timezone as a canonical IANA identifier.
+ *
+ * Legacy names are canonicalized (`'Asia/Calcutta'` → `'Asia/Kolkata'`). Falls
+ * back to `'UTC'` when the runtime doesn't report a zone. Never throws.
+ *
+ * @example
+ * ```ts
+ * getUserTimeZone() // e.g. 'Europe/London'
+ * ```
  */
 export function getUserTimeZone(): string {
   let zone = 'UTC'
@@ -202,15 +237,38 @@ export function getUserTimeZone(): string {
 }
 
 /**
- * Check if a timezone identifier (or fixed offset like "+05:30") is valid
+ * Whether the current engine recognises a zone.
+ *
+ * Accepts IANA identifiers and links (`'US/Eastern'`) case-insensitively, plus
+ * fixed offsets: `'+05:30'`, `'-0930'`, `'+05'`.
+ *
+ * @param zone - The zone to check.
+ * @returns `false` for unknown zones and empty or non-string input; never throws.
+ *
+ * @example
+ * ```ts
+ * isValidTimeZone('Asia/Kathmandu') // true
+ * isValidTimeZone('+05:30') // true
+ * isValidTimeZone('Mars/Olympus_Mons') // false
+ * ```
  */
 export function isValidTimeZone(zone: string): boolean {
   return isValidZone(zone, getEngine())
 }
 
 /**
- * Canonical spelling of a timezone: links such as "Asia/Calcutta" resolve to
- * their primary zone where the engine knows them.
+ * The canonical spelling of a zone: links resolve to their primary zone and
+ * fixed offsets are normalized to `±HH:mm`.
+ *
+ * @param zone - An IANA identifier, link or fixed offset.
+ * @throws {@link TimezoneError} if the zone is invalid.
+ *
+ * @example
+ * ```ts
+ * canonicalizeTimeZone('Asia/Calcutta') // 'Asia/Kolkata'
+ * canonicalizeTimeZone('Europe/Kiev') // 'Europe/Kyiv'
+ * canonicalizeTimeZone('+0530') // '+05:30'
+ * ```
  */
 export function canonicalizeTimeZone(zone: string): string {
   return canonicalizeZone(zone, getEngine())
@@ -240,7 +298,24 @@ function buildTime(
 }
 
 /**
- * Convert an instant to a specific timezone
+ * Show an instant as it's seen in a zone.
+ *
+ * @param input - The instant: a `Date`, epoch milliseconds, or an ISO 8601
+ *   string with an offset or `Z`. Strings without an offset are rejected; use
+ *   {@link interpretLocal} for wall-clock times.
+ * @param zone - An IANA zone or fixed offset (`'+05:30'`).
+ * @param opts - `format`, the pattern for `local` (default
+ *   `'yyyy-MM-dd HH:mm:ss.SSS'`), and `locale` for names in that pattern.
+ * @returns The instant with its local time, offset, DST flag and abbreviation
+ *   in `zone`.
+ * @throws {@link TimezoneError} for an invalid zone, instant or pattern.
+ *
+ * @example
+ * ```ts
+ * fromUTC('2024-07-15T14:00:00Z', 'Australia/Lord_Howe').local // '2024-07-16 00:30:00.000'
+ * fromUTC('2024-07-15T14:00:00Z', 'Australia/Lord_Howe').offsetMinutes // 630
+ * fromUTC(0, 'Asia/Kathmandu', { format: 'HH:mm xxx' }).local // '05:30 +05:30'
+ * ```
  */
 export function fromUTC(input: DateInput, zone: string, opts: FormatOptions = {}): ClockworkTime {
   const engine = getEngine()
@@ -273,8 +348,30 @@ function wallTimeToComponents(wall: string | WallTime): DateComponents {
 }
 
 /**
- * Interpret a wall-clock time in a zone: either a string without an offset
- * ("2024-03-10T02:30:00") or fields ({ year: 2024, month: 3, day: 10, hour: 2, minute: 30 })
+ * Turn a wall-clock time in a zone into an instant.
+ *
+ * A wall time can be skipped (DST starts) or happen twice (DST ends).
+ * `disambiguation` picks the instant, with Temporal's semantics:
+ * - `'compatible'` (default): the later instant in a gap, the earlier in an overlap
+ * - `'earliest'` / `'latest'`: the earlier or later candidate
+ * - `'reject'`: throw {@link InvalidTimeError} (gap) or {@link AmbiguousTimeError} (overlap)
+ *
+ * @param wallTime - A string without an offset (`'2024-03-10T02:30'`; `T` or a
+ *   space; seconds and fraction optional) or fields (see {@link WallTime}).
+ * @param zone - An IANA zone or fixed offset.
+ * @param opts - `disambiguation`, plus `format` and `locale` for `local`.
+ * @throws {@link TimezoneError} for an invalid zone or wall time (such as 30 February).
+ *
+ * @example
+ * ```ts
+ * // 02:30 doesn't exist in New York on 10 March 2024: pushed forward to 03:30 EDT
+ * interpretLocal('2024-03-10T02:30:00', 'America/New_York').local // '2024-03-10 03:30:00.000'
+ *
+ * // 01:30 happens twice on 3 November 2024: pick the second (EST)
+ * interpretLocal({ year: 2024, month: 11, day: 3, hour: 1, minute: 30 }, 'America/New_York', { disambiguation: 'latest' }).utc // '2024-11-03T06:30:00.000Z'
+ * ```
+ *
+ * @see {@link https://clockworktz.dev/docs/dst-disambiguation | DST gaps and overlaps}
  */
 export function interpretLocal(
   wallTime: string | WallTime,
@@ -297,9 +394,25 @@ export function interpretLocal(
 }
 
 /**
- * Convert time from one timezone to another. Strings without an offset are
- * read as wall time in `fromZone`; instants (Date, epoch ms, strings with an
- * offset) are converted directly.
+ * Convert a time from one zone to another.
+ *
+ * A string without an offset is wall time in `fromZone`, resolved with
+ * `disambiguation` (see {@link interpretLocal}). An instant (`Date`, epoch
+ * milliseconds, or ISO string with an offset) is converted directly, and
+ * `fromZone` is only validated.
+ *
+ * @param input - Wall time in `fromZone`, or an instant.
+ * @param fromZone - The zone `input` is in, when it's a wall time.
+ * @param toZone - The zone to show the result in.
+ * @param opts - `disambiguation`, plus `format` and `locale` for the result's `local`.
+ * @returns The time in `toZone`.
+ * @throws {@link TimezoneError} for invalid zones or input; {@link InvalidTimeError}
+ *   or {@link AmbiguousTimeError} with `disambiguation: 'reject'`.
+ *
+ * @example
+ * ```ts
+ * convert('2024-07-15T16:30:00', 'Asia/Kathmandu', 'America/St_Johns').local // '2024-07-15 08:15:00.000'
+ * ```
  */
 export function convert(
   input: DateInput,
@@ -321,7 +434,20 @@ export function convert(
 }
 
 /**
- * Offset, DST flag and abbreviation in effect at an instant
+ * The offset, DST flag and abbreviation in effect in a zone at an instant.
+ *
+ * `offsetSeconds` keeps second precision, for historical local mean time. With
+ * `system-intl`, `isDST` comes from comparing the zone's January and July
+ * offsets; `embedded-tzdb` reports the tzdb flag.
+ *
+ * @param input - The instant: a `Date`, epoch milliseconds, or ISO string with an offset.
+ * @param zone - An IANA zone or fixed offset.
+ * @throws {@link TimezoneError} for an invalid zone or instant.
+ *
+ * @example
+ * ```ts
+ * getZoneInfo('2024-07-15T12:00:00Z', 'Asia/Kathmandu') // { offsetSeconds: 20700, isDST: false, abbreviation: '+0545' }
+ * ```
  */
 export function getZoneInfo(input: DateInput, zone: string): ZoneInfo {
   const engine = getEngine()
@@ -330,14 +456,36 @@ export function getZoneInfo(input: DateInput, zone: string): ZoneInfo {
 }
 
 /**
- * Get timezone offset in minutes at an instant
+ * A zone's offset from UTC at an instant, in minutes: `345` for +05:45,
+ * `-210` for −03:30. Fractional only for historical local mean time.
+ *
+ * @param input - The instant: a `Date`, epoch milliseconds, or ISO string with an offset.
+ * @param zone - An IANA zone or fixed offset.
+ * @throws {@link TimezoneError} for an invalid zone or instant.
+ *
+ * @example
+ * ```ts
+ * getOffset('2024-07-15T00:00:00Z', 'Pacific/Chatham') // 765
+ * getOffset('2024-01-15T00:00:00Z', 'Pacific/Chatham') // 825
+ * ```
  */
 export function getOffset(input: DateInput, zone: string): number {
   return getZoneInfo(input, zone).offsetSeconds / 60
 }
 
 /**
- * Check if an instant is in Daylight Saving Time. Returns false for invalid zones.
+ * Whether daylight saving time is in effect in a zone at an instant.
+ *
+ * @param input - The instant: a `Date`, epoch milliseconds, or ISO string with an offset.
+ * @param zone - An IANA zone or fixed offset.
+ * @returns `false` for invalid zones (rather than throwing) and for fixed offsets.
+ * @throws {@link TimezoneError} for an invalid instant.
+ *
+ * @example
+ * ```ts
+ * isDST('2024-01-15T00:00:00Z', 'Australia/Sydney') // true
+ * isDST('2024-07-15T00:00:00Z', 'Australia/Sydney') // false
+ * ```
  */
 export function isDST(input: DateInput, zone: string): boolean {
   if (!isValidTimeZone(zone)) {
@@ -377,8 +525,22 @@ function zoneLabel(
 }
 
 /**
- * ISO 3166 codes of the countries using a zone. Empty for fixed offsets,
- * zones not tied to a country (UTC) and engines without country data.
+ * ISO 3166 codes of the countries that use a zone.
+ *
+ * The `embedded-tzdb` engine reads IANA's `zone1970.tab`, so shared zones list
+ * every country. `system-intl` asks `Intl.Locale#getTimeZones` and returns `[]`
+ * on runtimes without it.
+ *
+ * @param zone - An IANA zone, link or fixed offset.
+ * @returns The country codes; `[]` for fixed offsets and zones not tied to a
+ *   country, such as `UTC`.
+ * @throws {@link TimezoneError} if the zone is invalid.
+ *
+ * @example
+ * ```ts
+ * getZoneCountries('Asia/Kathmandu') // ['NP']
+ * getZoneCountries('UTC') // []
+ * ```
  */
 export function getZoneCountries(zone: string): string[] {
   const engine = getEngine()
@@ -390,7 +552,24 @@ export function getZoneCountries(zone: string): string[] {
 }
 
 /**
- * List available timezones with labels and offsets, sorted by offset then name
+ * Every zone the engine lists, with a label and current offset, sorted by
+ * offset and then name. Useful for timezone pickers.
+ *
+ * @param opts - Options; see {@link ListOptions}:
+ *   - `labelStyle`: `'original'` (`Asia/Kathmandu`), `'offset'`
+ *     (`(UTC+05:45) Asia/Kathmandu`), `'abbrev'` (`Asia/Kathmandu (+0545)`) or
+ *     `'altName'` (`Asia/Kathmandu (Nepal Time)`)
+ *   - `at`: the instant for offsets and labels (default: now)
+ *   - `locale`: language for `altName` labels (default `'en'`)
+ *   - `country`: only zones used in this ISO 3166 country
+ * @returns Items with `value` (the zone), `label`, `offsetMinutes` and `countryCodes`.
+ *
+ * @example
+ * ```ts
+ * listTimeZones({ country: 'NP', labelStyle: 'offset', at: '2024-07-15T00:00:00Z' })[0].label // '(UTC+05:45) Asia/Kathmandu'
+ * ```
+ *
+ * @see {@link https://clockworktz.dev/docs/time-zone-lists | Time zone lists}
  */
 export function listTimeZones(opts: ListOptions = {}): TimeZoneItem[] {
   const engine = getEngine()
@@ -414,8 +593,17 @@ export function listTimeZones(opts: ListOptions = {}): TimeZoneItem[] {
 }
 
 /**
- * Called with the tzdb version each time the embedded engine loads newer
- * data, whether fetched here or picked up from another tab
+ * Subscribe to tzdb data updates. The callback receives the new version (such as
+ * `'2026g'`) each time the embedded engine loads newer data, whether fetched in
+ * this context or picked up from another tab.
+ *
+ * @param callback - Called with the tzdb version that was loaded.
+ * @returns A function that unsubscribes.
+ *
+ * @example
+ * ```ts
+ * const unsubscribe = onDataUpdate(version => console.log(`Timezone data updated to ${version}`))
+ * ```
  */
 export function onDataUpdate(callback: (version: string) => void): () => void {
   updateListeners.add(callback)
@@ -425,43 +613,74 @@ export function onDataUpdate(callback: (version: string) => void): () => void {
 }
 
 /**
- * Watch for timezone transitions (DST changes) in a zone
+ * Call `callback` just after each DST or offset transition in a zone, for as
+ * long as the watcher runs. Handles transitions further away than the 24.8-day
+ * `setTimeout` limit, and doesn't keep a Node process alive.
+ *
+ * @param zone - The zone to watch.
+ * @param callback - Called with the instant of each transition.
+ * @returns A function that stops watching. Invalid zones log a warning and
+ *   return a no-op.
+ *
+ * @example
+ * ```ts
+ * const stop = watchZoneTransitions('Europe/London', at => console.log('Clocks changed at', at))
+ * ```
  */
 export function watchZoneTransitions(zone: string, callback: (at: Date) => void): () => void {
   return watchZoneTransitionsImpl(zone, callback, getEngine())
 }
 
 /**
- * Watch for time ticks (regular intervals)
+ * Call `callback` now and then on every wall-clock multiple of `granularityMs`,
+ * so a 1000 ms clock ticks exactly on each second instead of drifting.
+ *
+ * @param callback - Called with the current time.
+ * @param granularityMs - Interval in milliseconds (default `1000`, minimum `100`).
+ * @returns A function that stops ticking.
+ *
+ * @example
+ * ```ts
+ * const stop = onTick(now => render(format(now, 'Asia/Tokyo', 'HH:mm:ss')))
+ * ```
  */
 export function onTick(callback: (now: Date) => void, granularityMs: number = 1000): () => void {
   return onTickImpl(callback, granularityMs)
 }
 
 /**
- * Get current engine instance (for advanced usage)
+ * The engine instance in use, for advanced use such as calling engine
+ * primitives directly. See {@link TzEngine}.
  */
 export function getCurrentEngine(): TzEngine {
   return getEngine()
 }
 
 /**
- * Manually set the engine (for testing or advanced usage)
+ * Replace the engine with your own {@link TzEngine} implementation, or an engine
+ * created with {@link createEmbeddedTzdbEngine} or {@link createSystemIntlEngine}.
+ * Unlike {@link initClockworkTZ}, this doesn't touch auto-updates.
+ *
+ * @param engine - The engine to use from now on.
  */
 export function setEngine(engine: TzEngine): void {
   setEngineState(engine)
 }
 
 /**
- * Get current initialization options
+ * A copy of the options last passed to {@link initClockworkTZ}.
  */
 export function getInitOptions(): ClockworkOptions {
   return { ...initOptions }
 }
 
 /**
- * Force a refresh of timezone data from the configured manifest. Resolves
- * true when new data was loaded.
+ * Check the configured manifest for newer tzdb data now, instead of waiting for
+ * the next auto-update.
+ *
+ * @returns `true` if newer verified data was loaded, otherwise `false`.
+ * @throws {@link TimezoneError} if the engine isn't `embedded-tzdb` or no
+ *   `manifestURL` was configured.
  */
 export async function refreshTimezoneData(): Promise<boolean> {
   if (getEngine().kind !== 'embedded-tzdb') {
@@ -477,7 +696,13 @@ export async function refreshTimezoneData(): Promise<boolean> {
 }
 
 /**
- * Get library status information
+ * The engine in use, its tzdb version, whether it has data, and when data was
+ * last loaded.
+ *
+ * @example
+ * ```ts
+ * getStatus() // { engine: 'system-intl', tzdbVersion: undefined, dataLoaded: true, lastUpdate: undefined }
+ * ```
  */
 export function getStatus(): {
   engine: EngineKind
