@@ -38,8 +38,8 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "test": "vitest",
-    "test:run": "vitest run",
+    "test": "vitest --project node",
+    "test:run": "vitest run --project node",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.tools.json",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
@@ -47,7 +47,9 @@
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test:run && npm run check:pkg",
     "check:pkg": "publint && attw --pack .",
-    "build:tzdb": "node scripts/build-tzdb.ts"
+    "build:tzdb": "node scripts/build-tzdb.ts",
+    "test:browser": "vitest run --project browser",
+    "test:coverage": "vitest run --project node --coverage"
   },
   "keywords": [
     "timezone",
@@ -76,8 +78,10 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@types/node": "^26.6.6",
+    "@vitest/browser-playwright": "^5.0.5",
     "@vitest/coverage-v8": "^5.0.5",
     "oxlint": "^1.90.0",
+    "playwright": "^1.64.1",
     "prettier": "^3.9.10",
     "publint": "^0.3.25",
     "tsdown": "^0.23.4",

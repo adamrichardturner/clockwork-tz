@@ -91,17 +91,32 @@ function tokenize(pattern: string): Token[] {
   while (i < pattern.length) {
     const ch = pattern[i]!
     if (ch === "'") {
+      // '' is a literal quote; otherwise read until the closing quote,
+      // where '' inside the quoted text is also a literal quote
       if (pattern[i + 1] === "'") {
         tokens.push({ literal: "'" })
         i += 2
         continue
       }
-      const end = pattern.indexOf("'", i + 1)
-      if (end === -1) {
-        throw new TimezoneError(`Unterminated quote in format pattern: ${pattern}`)
+      let text = ''
+      let j = i + 1
+      for (;;) {
+        if (j >= pattern.length) {
+          throw new TimezoneError(`Unterminated quote in format pattern: ${pattern}`)
+        }
+        if (pattern[j] === "'") {
+          if (pattern[j + 1] === "'") {
+            text += "'"
+            j += 2
+            continue
+          }
+          break
+        }
+        text += pattern[j]
+        j++
       }
-      tokens.push({ literal: pattern.slice(i + 1, end).replace(/''/g, "'") })
-      i = end + 1
+      tokens.push({ literal: text })
+      i = j + 1
       continue
     }
     if (/[A-Za-z]/.test(ch)) {
