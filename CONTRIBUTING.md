@@ -35,7 +35,7 @@ first publish of each package is done by hand from a logged-in maintainer:
 
    ```bash
    (cd packages/clockworktz-data && npm publish --access public --provenance=false)
-   npm trust github clockworktz-data --repo adamrichardturner/clockworktz --file tzdb-update.yml --allow-publish
+   npm trust github @adamrichardturner/clockworktz-data --repo adamrichardturner/clockworktz --file tzdb-update.yml --allow-publish
    ```
 
 2. Publish the library, then link it to the Release workflow:
@@ -80,7 +80,7 @@ The TZDB Update workflow runs daily. When IANA publishes a new release it:
 
 1. builds it, verifying IANA's signatures
 2. signs it with the `TZDB_SIGNING_KEY` secret and tests the library against it
-3. publishes `clockworktz-data` (so running apps get the update through the signed manifest)
+3. publishes `@adamrichardturner/clockworktz-data` (so running apps get the update through the signed manifest)
 4. opens a `feat(tzdb): …` pull request with the new bundled snapshot, and starts CI on it
 
 Merge that pull request, then release a patch version so new installs bundle the new data.

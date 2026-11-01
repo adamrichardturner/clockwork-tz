@@ -131,7 +131,7 @@ import { tzdb } from 'clockworktz/tzdb'
 await initClockworkTZ({
   engine: 'embedded-tzdb',
   data: tzdb, // used immediately and whenever an update can't be verified
-  manifestURL: DEFAULT_MANIFEST_URL, // jsDelivr, from the clockworktz-data package
+  manifestURL: DEFAULT_MANIFEST_URL, // jsDelivr, from the @adamrichardturner/clockworktz-data package
   autoUpdateIntervalMs: 24 * 60 * 60 * 1000, // 0 disables periodic checks
 })
 ```

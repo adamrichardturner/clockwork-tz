@@ -11,9 +11,10 @@ import type { TzdbManifest, CachedTzdbData } from './types.js'
 import { getCacheStorage, createBroadcastChannel } from '../utils/env.js'
 
 /**
- * Default manifest, published with the `clockworktz-data` package
+ * Default manifest, published with the `@adamrichardturner/clockworktz-data` package
  */
-export const DEFAULT_MANIFEST_URL = 'https://cdn.jsdelivr.net/npm/clockworktz-data@1/manifest.json'
+export const DEFAULT_MANIFEST_URL =
+  'https://cdn.jsdelivr.net/npm/@adamrichardturner/clockworktz-data@1/manifest.json'
 
 /**
  * Raw Ed25519 public key (base64) that signs the official manifests

@@ -43,23 +43,23 @@ function main(): void {
   const sha256 = createHash('sha256').update(bytes).digest('hex')
   const signature = sign(null, Buffer.from(`${version}\n${sha256}`), privateKey).toString('base64')
   const npmVersion = packageVersion(version)
+  const pkgPath = join(PACKAGE_DIR, 'package.json')
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { name: string; version: string }
 
   const manifest: TzdbManifest = {
     version,
     releaseDate: new Date().toISOString(),
-    dataUrl: `https://cdn.jsdelivr.net/npm/clockworktz-data@${npmVersion}/tzdb.json`,
+    dataUrl: `https://cdn.jsdelivr.net/npm/${pkg.name}@${npmVersion}/tzdb.json`,
     sha256,
     signature,
     keyId: createHash('sha256').update(publicKey).digest('hex').slice(0, 16),
   }
   writeFileSync(join(PACKAGE_DIR, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 
-  const pkgPath = join(PACKAGE_DIR, 'package.json')
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string }
   pkg.version = npmVersion
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
 
-  console.log(`Signed tzdb ${version} as clockworktz-data@${npmVersion} (public key ${publicKey})`)
+  console.log(`Signed tzdb ${version} as ${pkg.name}@${npmVersion} (public key ${publicKey})`)
 }
 
 if (import.meta.main) {

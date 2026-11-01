@@ -1,5 +1,5 @@
 {
-  "name": "clockworktz-data",
+  "name": "@adamrichardturner/clockworktz-data",
   "version": "1.2026.6",
   "description": "Signed IANA timezone data for clockworktz's embedded-tzdb engine",
   "homepage": "https://clockworktz.dev/docs/engines",

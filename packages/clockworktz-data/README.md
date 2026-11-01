@@ -1,4 +1,4 @@
-# clockworktz-data
+# @adamrichardturner/clockworktz-data
 
 Compiled [IANA tzdb](https://www.iana.org/time-zones) releases for the
 [`clockworktz`](https://www.npmjs.com/package/clockworktz) `embedded-tzdb` engine.
@@ -8,7 +8,7 @@ Compiled [IANA tzdb](https://www.iana.org/time-zones) releases for the
   `${version}\n${sha256}`
 
 Versions are `1.<year>.<release>`, so tzdb `2026f` is `1.2026.6`.
-clockworktz fetches `https://cdn.jsdelivr.net/npm/clockworktz-data@1/manifest.json`
+clockworktz fetches `https://cdn.jsdelivr.net/npm/@adamrichardturner/clockworktz-data@1/manifest.json`
 and only loads data whose signature verifies against the public key built into
 the library.
 
