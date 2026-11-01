@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The project uses
 [Conventional Commits](https://www.conventionalcommits.org/) by the Release workflow when
 changes are merged to `main`.
 
+## [1.0.1](https://github.com/adamrichardturner/clockworktz/compare/v1.0.0...v1.0.1) - 2026-11-01
+
+### Fixes
+
+- document every public API with TSDoc ([74e6589](https://github.com/adamrichardturner/clockworktz/commit/74e6589e3f3d9a4d41ead02327df218055e7ebf6))
+
 ## [1.0.0](https://github.com/adamrichardturner/clockworktz/releases/tag/v1.0.0) - 2026-11-01
 
 First release.
