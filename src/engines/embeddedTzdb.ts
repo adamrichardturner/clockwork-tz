@@ -33,7 +33,8 @@ function isCompactZone(value: unknown): value is CompactZone {
 }
 
 /**
- * Validate the shape of tzdb data (zone contents are checked lazily on first use)
+ * Whether a value has the shape of clockworktz tzdb data. Zone contents are
+ * checked when each zone is first used.
  */
 export function isTzdbData(value: unknown): value is TzdbData {
   const data = value as Partial<TzdbData> | null
@@ -86,7 +87,14 @@ function sameInfo(a: ZoneInfo, b: ZoneInfo): boolean {
 }
 
 /**
- * Embedded TZDB engine
+ * An engine backed by a compiled IANA tzdb release, for identical results on
+ * every platform: exact DST flags and abbreviations, local mean time before
+ * standardization, every transition, and rules past 2100.
+ *
+ * Zones are decoded on first use. Links (`US/Eastern`) and lookups are
+ * case-insensitive.
+ *
+ * Usually created for you by `initClockworkTZ({ engine: 'embedded-tzdb', data: tzdb })`.
  */
 export class EmbeddedTzdbEngine implements LoadableEngine {
   readonly kind = 'embedded-tzdb' as const
@@ -104,10 +112,17 @@ export class EmbeddedTzdbEngine implements LoadableEngine {
     }
   }
 
+  /** The loaded tzdb release, such as `'2026f'`, or `undefined` before data is loaded */
   getVersion(): string | undefined {
     return this.data?.version
   }
 
+  /**
+   * Replace the engine's data, for example with a newer release.
+   *
+   * @throws {@link TimezoneError} if `data` isn't valid clockworktz tzdb data;
+   *   the current data is kept.
+   */
   loadTzdbData(data: unknown): void {
     if (!isTzdbData(data)) {
       throw new TimezoneError('Invalid timezone data: expected clockworktz tzdb JSON')
@@ -127,14 +142,17 @@ export class EmbeddedTzdbEngine implements LoadableEngine {
     this.records = new Map()
   }
 
+  /** Whether tzdb data has been loaded */
   isDataLoaded(): boolean {
     return this.data !== null
   }
 
+  /** Whether the loaded data has a zone or link with this name (case-insensitive) */
   isValidTimeZone(zone: string): boolean {
     return typeof zone === 'string' && this.lookup.has(zone.toLowerCase())
   }
 
+  /** The canonical name of a zone: links resolve, and listed names keep their spelling (`'utc'` → `'UTC'`) */
   canonicalize(zone: string): string {
     const key = String(zone).toLowerCase()
     const canonical = this.lookup.get(key)
@@ -145,16 +163,19 @@ export class EmbeddedTzdbEngine implements LoadableEngine {
     return this.listedNames.get(key) ?? canonical
   }
 
+  /** ISO 3166 codes of the countries using a zone, from `zone1970.tab` */
   getCountryCodes(zone: string): string[] {
     this.record(zone)
     const canonical = this.lookup.get(String(zone).toLowerCase())!
     return [...(this.data?.countries?.[canonical] ?? [])]
   }
 
+  /** The zones in `zone1970.tab`, plus `UTC`: one per region, for pickers */
   listZoneIds(): string[] {
     return this.data ? [...this.data.listed] : []
   }
 
+  /** The offset, DST flag and abbreviation in effect in `zone` at `epochMs` */
   getZoneInfo(epochMs: number, zone: string): ZoneInfo {
     const record = this.record(zone)
     const { times, infos } = record
@@ -185,6 +206,7 @@ export class EmbeddedTzdbEngine implements LoadableEngine {
     return infos[lo]!
   }
 
+  /** Every transition in [`fromMs`, `toMs`), from the tzdb table and its POSIX rule */
   getTransitions(zone: string, fromMs: number, toMs: number): Transition[] {
     const record = this.record(zone)
     const result: Transition[] = []
@@ -239,7 +261,19 @@ export class EmbeddedTzdbEngine implements LoadableEngine {
 }
 
 /**
- * Create a new embedded TZDB engine, optionally with data already loaded
+ * Create an {@link EmbeddedTzdbEngine}, optionally with data already loaded.
+ *
+ * @param data - tzdb data, usually `tzdb` from `'clockworktz/tzdb'`.
+ * @throws {@link TimezoneError} if `data` isn't valid clockworktz tzdb data.
+ *
+ * @example
+ * ```ts
+ * import { createEmbeddedTzdbEngine } from 'clockworktz'
+ * import { tzdb } from 'clockworktz/tzdb'
+ *
+ * const engine = createEmbeddedTzdbEngine(tzdb)
+ * engine.getVersion() // '2026f'
+ * ```
  */
 export function createEmbeddedTzdbEngine(data?: unknown): EmbeddedTzdbEngine {
   return new EmbeddedTzdbEngine(data)

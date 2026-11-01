@@ -1,6 +1,19 @@
 /**
- * clockworktz - Accurate timezone conversions and DST handling
+ * clockworktz: timezone conversions that get the weird zones right.
  *
+ * Exact DST gap and overlap handling (Temporal semantics), half- and
+ * quarter-hour offsets, and an optional deterministic IANA tzdb engine, with
+ * zero runtime dependencies.
+ *
+ * @example
+ * ```ts
+ * import { fromUTC, convert, interpretLocal, format } from 'clockworktz'
+ *
+ * fromUTC('2024-07-15T14:00:00Z', 'Australia/Lord_Howe').local // '2024-07-16 00:30:00.000'
+ * ```
+ *
+ * @see {@link https://clockworktz.dev/docs | Documentation}
+ * @packageDocumentation
  * @license MIT
  */
 
@@ -106,5 +119,7 @@ export type { EnsureFreshOptions } from './data/updater.js'
 export { createSystemIntlEngine, SystemIntlEngine } from './engines/systemIntl.js'
 export { createEmbeddedTzdbEngine, EmbeddedTzdbEngine } from './engines/embeddedTzdb.js'
 
-/** Library version */
+/**
+ * The version of clockworktz, such as `'1.0.1'`.
+ */
 export const VERSION: string = __VERSION__

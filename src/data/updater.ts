@@ -11,13 +11,17 @@ import type { TzdbManifest, CachedTzdbData } from './types.js'
 import { getCacheStorage, createBroadcastChannel } from '../utils/env.js'
 
 /**
- * Default manifest, published with the `@adamrichardturner/clockworktz-data` package
+ * URL of the official signed tzdb manifest, published with
+ * `@adamrichardturner/clockworktz-data` on jsDelivr. Pass it as `manifestURL`
+ * to {@link initClockworkTZ} to keep the embedded engine's data current.
  */
 export const DEFAULT_MANIFEST_URL =
   'https://cdn.jsdelivr.net/npm/@adamrichardturner/clockworktz-data@1/manifest.json'
 
 /**
- * Raw Ed25519 public key (base64) that signs the official manifests
+ * Raw Ed25519 public key (base64) that signs the official manifests. Updates
+ * are only accepted when their signature verifies against it, or against the
+ * `publicKey` you pass for self-hosted data.
  */
 export const DEFAULT_PUBLIC_KEY = 'DLvL/miUAfXKI8Sae27IuV/o5l3vbg5OIp5QMkeXLkU='
 
@@ -51,15 +55,26 @@ function requestInit(init: RequestInit): RequestInit {
   return signal ? { ...init, signal } : init
 }
 
+/**
+ * Options for {@link ensureFreshTzdb}.
+ */
 export interface EnsureFreshOptions {
-  /** Base64 raw Ed25519 public key (default: DEFAULT_PUBLIC_KEY) */
+  /** Raw Ed25519 public key, base64, that the manifest must be signed with (default {@link DEFAULT_PUBLIC_KEY}) */
   publicKey?: string
-  /** fetch implementation (default: globalThis.fetch) */
+  /** `fetch` implementation to use (default `globalThis.fetch`) */
   fetch?: typeof fetch
 }
 
 /**
- * Compare tzdb versions such as "2024a", "2024b", "2024z", "2024za"
+ * Compare two tzdb release names in release order.
+ *
+ * @returns A negative number if `a` is older, positive if newer, `0` if equal.
+ *
+ * @example
+ * ```ts
+ * compareTzdbVersions('2024a', '2024b') // -1
+ * compareTzdbVersions('2024za', '2024z') // 1
+ * ```
  */
 export function compareTzdbVersions(a: string, b: string): number {
   const parse = (v: string) => {
@@ -110,8 +125,13 @@ function subtle(): SubtleCrypto | null {
 }
 
 /**
- * Verify a manifest's Ed25519 signature. Fails closed: returns false when
- * WebCrypto or Ed25519 support is unavailable.
+ * Verify a manifest's Ed25519 signature over `${version}\n${sha256}` with
+ * WebCrypto.
+ *
+ * @param manifest - The manifest's `version`, `sha256` and `signature`.
+ * @param publicKey - Raw Ed25519 public key, base64 (default {@link DEFAULT_PUBLIC_KEY}).
+ * @returns `true` only if the signature verifies. Fails closed: `false` when
+ *   WebCrypto or Ed25519 isn't available. Never throws.
  */
 export async function verifyManifestSignature(
   manifest: Pick<TzdbManifest, 'version' | 'sha256' | 'signature'>,
@@ -160,11 +180,23 @@ async function writeCache(key: string, entry: CachedTzdbData): Promise<void> {
 }
 
 /**
- * Ensure fresh timezone database data is available.
+ * Get verified tzdb data from a manifest, using the cache when it's fresh.
  *
- * Returns cached data while it is younger than 24 hours, otherwise checks the
- * manifest, downloads and verifies newer data, and falls back to cached data on
- * any failure. Never downgrades to an older tzdb version.
+ * Cached data younger than 24 hours is returned without a request. Otherwise
+ * the manifest is fetched, and newer data is downloaded and accepted only if its
+ * Ed25519 signature verifies and its SHA-256 matches. It's never older than the
+ * cached version. Any failure falls back to the cached data. Requests time out
+ * after 30 seconds.
+ *
+ * {@link initClockworkTZ} calls this for you; use it directly to prefetch or
+ * inspect data.
+ *
+ * @param manifestURL - The manifest URL (default {@link DEFAULT_MANIFEST_URL}).
+ * @param options - `publicKey` for self-hosted data, and a `fetch` implementation.
+ * @returns The version and data, or `null` when nothing verified is available.
+ *   Never throws.
+ *
+ * @see {@link https://clockworktz.dev/docs/security | Security of data updates}
  */
 export async function ensureFreshTzdb(
   manifestURL: string = DEFAULT_MANIFEST_URL,
@@ -284,7 +316,11 @@ export function onBroadcastUpdate(callback: (version: string, source: string) =>
 }
 
 /**
- * Clear cached timezone data, for one manifest or (by default) all of them
+ * Delete cached tzdb data: for one manifest and key, or (with no arguments) all
+ * of it. The cache is `localStorage` in browsers and process memory in Node.
+ *
+ * @param manifestURL - Only clear data from this manifest.
+ * @param publicKey - The key that manifest is verified with (default {@link DEFAULT_PUBLIC_KEY}).
  */
 export async function clearCache(
   manifestURL?: string,
@@ -307,7 +343,11 @@ export async function clearCache(
 }
 
 /**
- * Get cache statistics for a manifest (default: the official one)
+ * Whether data from a manifest is cached, its version and its age.
+ *
+ * @param manifestURL - The manifest (default {@link DEFAULT_MANIFEST_URL}).
+ * @param publicKey - The key it's verified with (default {@link DEFAULT_PUBLIC_KEY}).
+ * @returns `dataCached`, plus `dataVersion` and `dataAge` (milliseconds) when cached.
  */
 export async function getCacheStats(
   manifestURL: string = DEFAULT_MANIFEST_URL,

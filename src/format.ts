@@ -12,7 +12,8 @@ import { assertValidZone, zoneInfoAt } from './core/zone.js'
 import { normalizeToDate } from './utils/iso.js'
 
 /**
- * Default format pattern
+ * Pattern {@link format} uses when none is given: `'yyyy-MM-dd HH:mm:ss zzz'`,
+ * such as `2024-07-15 19:45:00 +0545`.
  */
 export const DEFAULT_FORMAT_PATTERN = 'yyyy-MM-dd HH:mm:ss zzz'
 
@@ -22,7 +23,21 @@ export const DEFAULT_FORMAT_PATTERN = 'yyyy-MM-dd HH:mm:ss zzz'
 export const LOCAL_TIME_PATTERN = 'yyyy-MM-dd HH:mm:ss.SSS'
 
 /**
- * Common format patterns
+ * Ready-made patterns for {@link format} and {@link formatWithPattern}.
+ *
+ * | Name         | Example output                                       |
+ * | ------------ | ---------------------------------------------------- |
+ * | `default`    | `2024-03-15 14:30:00 PDT`                            |
+ * | `dateOnly`   | `2024-03-15`                                         |
+ * | `timeOnly`   | `14:30:00`                                           |
+ * | `dateTime`   | `2024-03-15 14:30:00`                                |
+ * | `dateTimeMs` | `2024-03-15 14:30:00.123`                            |
+ * | `amPm`       | `2024-03-15 2:30:00 PM PDT`                          |
+ * | `human`      | `March 15, 2024 at 2:30 PM PDT`                      |
+ * | `short`      | `3/15/24 2:30 PM`                                    |
+ * | `long`       | `Friday, March 15, 2024 at 2:30:00 PM Pacific Daylight Time` |
+ * | `rfc2822`    | `Fri, 15 Mar 2024 14:30:00 -0700`                    |
+ * | `iso8601`    | `2024-03-15T14:30:00-07:00`                          |
  */
 export const FORMAT_PATTERNS = {
   /** ISO-like with timezone abbreviation: 2024-03-15 14:30:00 PST */
@@ -320,14 +335,30 @@ export function formatInstant(
 }
 
 /**
- * Format a date/time in a specific timezone
+ * Format an instant as it's seen in a zone.
  *
- * @param input - Date, epoch milliseconds, or ISO string with offset
- * @param zone - IANA timezone identifier or fixed offset like "+05:30"
- * @param pattern - Format pattern (defaults to DEFAULT_FORMAT_PATTERN)
- * @param locale - Locale for month, weekday and day period names (default "en")
- * @returns Formatted date string
- * @throws TimezoneError if timezone is invalid or the pattern is unsupported
+ * Patterns use a date-fns-compatible subset of tokens:
+ * - `yyyy` `yy` year · `M` `MM` `MMM` `MMMM` month · `d` `dd` day · `EEE` `EEEE` weekday
+ * - `H` `HH` (24 h) · `h` `hh` (12 h) · `a` (AM/PM) · `m` `mm` · `s` `ss` · `S` `SS` `SSS`
+ * - `zzz` abbreviation (`EDT`, `+0545`) · `zzzz` long name (`Eastern Daylight Time`)
+ * - `x` `xx` `xxx` offset (`+0545`, `+05:45`) · `xxxx` `xxxxx` with seconds when non-zero
+ * - `X`… as `x` but `Z` for UTC · `O` `OOOO` (`GMT+5:45`, `GMT+05:45`)
+ * - `'text'` literal text · `''` a literal quote
+ *
+ * @param input - The instant: a `Date`, epoch milliseconds, or ISO string with an offset.
+ * @param zone - An IANA zone or fixed offset.
+ * @param pattern - The pattern (default {@link DEFAULT_FORMAT_PATTERN}).
+ * @param locale - Locale for month, weekday and AM/PM names (default `'en'`).
+ * @throws {@link TimezoneError} for an invalid zone or instant, or an unsupported token.
+ *
+ * @example
+ * ```ts
+ * format('2024-07-15T14:00:00Z', 'Pacific/Chatham', 'yyyy-MM-dd HH:mm xxx') // '2024-07-16 02:45 +12:45'
+ * format('2024-07-15T14:00:00Z', 'Europe/Paris', 'EEEE d MMMM', 'fr') // 'lundi 15 juillet'
+ * format('2024-07-15T14:00:00Z', 'Asia/Kathmandu', "h 'o''clock'") // "7 o'clock"
+ * ```
+ *
+ * @see {@link https://clockworktz.dev/docs/formatting | Formatting}
  */
 export function format(
   input: DateInput,
@@ -342,7 +373,17 @@ export function format(
 }
 
 /**
- * Format a date using a predefined pattern
+ * Format an instant with one of the named {@link FORMAT_PATTERNS}.
+ *
+ * @param input - The instant: a `Date`, epoch milliseconds, or ISO string with an offset.
+ * @param zone - An IANA zone or fixed offset.
+ * @param patternName - A key of {@link FORMAT_PATTERNS}, such as `'iso8601'`.
+ * @throws {@link TimezoneError} for an invalid zone, instant or pattern name.
+ *
+ * @example
+ * ```ts
+ * formatWithPattern('2024-07-15T14:00:00Z', 'Asia/Tokyo', 'iso8601') // '2024-07-15T23:00:00+09:00'
+ * ```
  */
 export function formatWithPattern(
   input: DateInput,
@@ -358,14 +399,37 @@ export function formatWithPattern(
 }
 
 /**
- * Format current time in a timezone
+ * Format the current time in a zone.
+ *
+ * @param zone - An IANA zone or fixed offset.
+ * @param pattern - The pattern (default {@link DEFAULT_FORMAT_PATTERN}).
+ * @throws {@link TimezoneError} for an invalid zone or pattern.
+ *
+ * @example
+ * ```ts
+ * formatNow('Asia/Tokyo', 'HH:mm') // e.g. '23:00'
+ * ```
  */
 export function formatNow(zone: string, pattern?: string): string {
   return format(new Date(), zone, pattern)
 }
 
 /**
- * Format a date for different common use cases
+ * Format an instant for a common use:
+ * - `'display'`: with the zone abbreviation, `2024-07-15 10:00:00 EDT`
+ * - `'log'` and `'api'`: ISO 8601 with offset, `2024-07-15T10:00:00-04:00`
+ * - `'filename'`: no colons or spaces, `2024-07-15_10-00-00`
+ * - `'human'`: `July 15, 2024 at 10:00 AM EDT`
+ *
+ * @param input - The instant: a `Date`, epoch milliseconds, or ISO string with an offset.
+ * @param zone - An IANA zone or fixed offset.
+ * @param useCase - One of the uses above.
+ * @throws {@link TimezoneError} for an invalid zone or instant.
+ *
+ * @example
+ * ```ts
+ * formatFor('2024-07-15T14:00:00Z', 'America/New_York', 'filename') // '2024-07-15_10-00-00'
+ * ```
  */
 export function formatFor(
   input: DateInput,
@@ -391,7 +455,22 @@ export function formatFor(
 }
 
 /**
- * Format a date range in a timezone
+ * Format a start and end instant as a range in a zone. When both fall on the
+ * same local day (and `sameDay` isn't `false`), the date is shown once:
+ * `2024-07-15 09:00 – 11:30 EDT`.
+ *
+ * @param start - The start instant.
+ * @param end - The end instant.
+ * @param zone - An IANA zone or fixed offset.
+ * @param options - `pattern` for each end when the days differ (default
+ *   {@link DEFAULT_FORMAT_PATTERN}), `separator` (default `' – '`) and `sameDay`
+ *   (default `true`).
+ * @throws {@link TimezoneError} for an invalid zone or instant.
+ *
+ * @example
+ * ```ts
+ * formatRange('2024-07-15T13:00:00Z', '2024-07-15T15:30:00Z', 'America/New_York') // '2024-07-15 09:00 – 11:30 EDT'
+ * ```
  */
 export function formatRange(
   start: DateInput,
@@ -423,7 +502,21 @@ export function formatRange(
 }
 
 /**
- * Format duration between two dates
+ * Describe the time between two instants, such as `'1 day, 2 hours'`. The order
+ * of `start` and `end` doesn't matter.
+ *
+ * @param start - One instant.
+ * @param end - The other instant.
+ * @param options - `units` to include, largest first (default
+ *   `['days', 'hours', 'minutes']`), and `precision`, the most parts to show
+ *   (default `2`).
+ * @throws {@link TimezoneError} for an invalid instant.
+ *
+ * @example
+ * ```ts
+ * formatDuration('2024-07-15T00:00:00Z', '2024-07-16T02:30:00Z') // '1 day, 2 hours'
+ * formatDuration(0, 90_000, { units: ['minutes', 'seconds'] }) // '1 minute, 30 seconds'
+ * ```
  */
 export function formatDuration(
   start: DateInput,
@@ -461,8 +554,18 @@ export function formatDuration(
 }
 
 /**
- * Format relative time (e.g., "2 hours ago", "in 3 days"). Beyond a week the
- * target date is shown in `zone`.
+ * Describe an instant relative to another: `'2 hours ago'`, `'in 3 days'`.
+ * More than a week away, it shows the date in `zone` instead (`'2024-08-15'`).
+ *
+ * @param date - The instant to describe.
+ * @param zone - The zone for dates more than a week away.
+ * @param relativeTo - The reference instant (default: now).
+ * @throws {@link TimezoneError} for an invalid zone or instant.
+ *
+ * @example
+ * ```ts
+ * formatRelative('2024-07-15T12:00:00Z', 'UTC', '2024-07-15T14:00:00Z') // '2 hours ago'
+ * ```
  */
 export function formatRelative(
   date: DateInput,
@@ -501,14 +604,28 @@ export function formatRelative(
 }
 
 /**
- * Format timezone offset in minutes as ±HH:mm
+ * Format an offset in minutes as `±HH:mm`.
+ *
+ * @param offsetMinutes - The offset, such as {@link ClockworkTime.offsetMinutes}.
+ *
+ * @example
+ * ```ts
+ * formatOffset(345) // '+05:45'
+ * formatOffset(-570) // '-09:30'
+ * ```
  */
 export function formatOffset(offsetMinutes: number): string {
   return formatOffsetToken(Math.round(offsetMinutes * 60), 'x', 3)
 }
 
 /**
- * Validate a format pattern
+ * Whether {@link format} supports every token in a pattern. Never throws.
+ *
+ * @example
+ * ```ts
+ * isValidFormatPattern('yyyy-MM-dd') // true
+ * isValidFormatPattern('QQQ') // false
+ * ```
  */
 export function isValidFormatPattern(pattern: string): boolean {
   try {

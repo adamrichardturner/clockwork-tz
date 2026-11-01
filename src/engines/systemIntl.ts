@@ -107,7 +107,16 @@ const REGION_CODES =
 const MAX_CACHED_ZONES = 1024
 
 /**
- * System Intl timezone engine using platform APIs
+ * The default engine: timezone data comes from the runtime's `Intl` API (ICU in
+ * Node and browsers), so there's nothing to ship and updates arrive with the OS
+ * or runtime. Different platforms may be on different tzdb releases.
+ *
+ * `isDST` is derived by comparing a zone's January and July offsets, because
+ * `Intl` doesn't expose the DST flag. Legacy CLDR names (`Asia/Calcutta`) are
+ * reported with their IANA names (`Asia/Kolkata`).
+ *
+ * You rarely need this class directly; it's what {@link initClockworkTZ} uses by
+ * default.
  */
 export class SystemIntlEngine implements TzEngine {
   readonly kind = 'system-intl' as const
@@ -118,10 +127,12 @@ export class SystemIntlEngine implements TzEngine {
   private readonly standardOffsets = new Map<string, number>()
   private countries: Map<string, string[]> | null = null
 
+  /** Always `undefined`: the data comes from the runtime, not a pinned tzdb release */
   getVersion(): string | undefined {
     return undefined
   }
 
+  /** Whether the runtime's `Intl` knows a zone (links included); never throws */
   isValidTimeZone(zone: string): boolean {
     if (typeof zone !== 'string' || zone.trim() === '') {
       return false
@@ -142,11 +153,13 @@ export class SystemIntlEngine implements TzEngine {
     return valid
   }
 
+  /** The runtime's canonical name for a zone, with legacy CLDR names mapped to IANA (`Asia/Calcutta` → `Asia/Kolkata`) */
   canonicalize(zone: string): string {
     this.assertValid(zone)
     return toIana(new Intl.DateTimeFormat('en-US', { timeZone: zone }).resolvedOptions().timeZone)
   }
 
+  /** Every zone from `Intl.supportedValuesOf('timeZone')` plus `UTC`, or a curated list on older runtimes */
   listZoneIds(): string[] {
     const supportedValuesOf = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] })
       .supportedValuesOf
@@ -191,6 +204,7 @@ export class SystemIntlEngine implements TzEngine {
     return [...(this.countries.get(this.canonicalize(zone)) ?? [])]
   }
 
+  /** The offset, DST flag and abbreviation in effect in `zone` at `epochMs` */
   getZoneInfo(epochMs: number, zone: string): ZoneInfo {
     this.assertValid(zone)
     const offsetSeconds = this.offsetSeconds(epochMs, zone)
@@ -302,7 +316,14 @@ export class SystemIntlEngine implements TzEngine {
 }
 
 /**
- * Create and return a new SystemIntl engine instance
+ * Create a {@link SystemIntlEngine}, for {@link setEngine} or for calling engine
+ * primitives directly.
+ *
+ * @example
+ * ```ts
+ * const intl = createSystemIntlEngine()
+ * intl.getZoneInfo(Date.UTC(2024, 6, 15), 'Asia/Kathmandu').offsetSeconds // 20700
+ * ```
  */
 export function createSystemIntlEngine(): SystemIntlEngine {
   return new SystemIntlEngine()

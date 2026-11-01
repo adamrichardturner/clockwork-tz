@@ -12,18 +12,19 @@ const MAX_TIMEOUT_MS = 2 ** 31 - 1
 const DEFAULT_SEARCH_DAYS = 2 * 366
 
 /**
- * Public description of a transition
+ * A change of offset, DST or abbreviation in a zone, as returned by
+ * {@link getNextTransition}, {@link getPreviousTransition} and {@link getTransitions}.
  */
 export interface TransitionInfo {
-  /** Instant of the transition */
+  /** The instant of the transition */
   date: Date
-  /** Offset before the transition, in minutes */
+  /** Offset from UTC before the transition, in minutes */
   fromOffset: number
-  /** Offset from the transition onwards, in minutes */
+  /** Offset from UTC from the transition onwards, in minutes */
   toOffset: number
-  /** Whether DST starts at this transition */
+  /** Whether DST starts here (clocks usually go forward) */
   isDSTStart: boolean
-  /** Whether DST ends at this transition */
+  /** Whether DST ends here (clocks usually go back) */
   isDSTEnd: boolean
   /** Abbreviation before the transition */
   fromAbbreviation: string
@@ -133,7 +134,25 @@ function nextTransition(zone: string, fromMs: number, engine: TzEngine, days: nu
 }
 
 /**
- * Get information about the next timezone transition after `from`
+ * The next DST or offset transition in a zone after an instant.
+ *
+ * Exact to the second with both engines: `embedded-tzdb` reads the tzdb,
+ * `system-intl` samples each day and bisects.
+ *
+ * @param zone - An IANA zone.
+ * @param from - Search after this instant (default: now).
+ * @param engine - Engine to use (default: the current one).
+ * @param searchDays - How far ahead to look (default about two years).
+ * @returns The transition, or `null` if there's none in range, the zone has no
+ *   DST (such as `Asia/Kolkata`) or is a fixed offset, or the zone is invalid.
+ *
+ * @example
+ * ```ts
+ * getNextTransition('Australia/Lord_Howe', '2024-07-15T14:00:00Z')?.date.toISOString() // '2024-10-05T15:30:00.000Z'
+ * getNextTransition('Australia/Lord_Howe', '2024-07-15T14:00:00Z')?.toOffset // 660
+ * ```
+ *
+ * @see {@link https://clockworktz.dev/docs/transitions | Transitions}
  */
 export function getNextTransition(
   zone: string,
@@ -150,7 +169,18 @@ export function getNextTransition(
 }
 
 /**
- * Get information about the most recent transition at or before `from`
+ * The most recent DST or offset transition in a zone at or before an instant.
+ *
+ * @param zone - An IANA zone.
+ * @param from - Search at or before this instant (default: now).
+ * @param engine - Engine to use (default: the current one).
+ * @param searchDays - How far back to look (default about two years).
+ * @returns The transition, or `null` if there's none in range or the zone is invalid.
+ *
+ * @example
+ * ```ts
+ * getPreviousTransition('Europe/London', '2024-07-01T00:00:00Z')?.date.toISOString() // '2024-03-31T01:00:00.000Z'
+ * ```
  */
 export function getPreviousTransition(
   zone: string,
@@ -168,7 +198,18 @@ export function getPreviousTransition(
 }
 
 /**
- * List every transition between two instants
+ * Every DST or offset transition in a zone between two instants, in order.
+ *
+ * @param zone - An IANA zone.
+ * @param from - Start of the range (inclusive).
+ * @param to - End of the range (exclusive).
+ * @param engine - Engine to use (default: the current one).
+ * @returns The transitions; `[]` for an invalid zone or a fixed offset.
+ *
+ * @example
+ * ```ts
+ * getTransitions('Pacific/Chatham', '2024-01-01T00:00:00Z', '2025-01-01T00:00:00Z').map(t => t.date.toISOString()) // ['2024-04-06T14:00:00.000Z', '2024-09-28T14:00:00.000Z']
+ * ```
  */
 export function getTransitions(
   zone: string,
@@ -188,7 +229,19 @@ export function getTransitions(
 }
 
 /**
- * Check if a date is within `windowHours` of a timezone transition
+ * Whether an instant is within `windowHours` of a transition in a zone, for
+ * warning users about times that may be skipped or repeated.
+ *
+ * @param date - The instant to check.
+ * @param zone - An IANA zone.
+ * @param engine - Engine to use (default: the current one).
+ * @param windowHours - How close counts as near (default `24`).
+ * @returns `false` for invalid zones.
+ *
+ * @example
+ * ```ts
+ * isNearTransition('2024-03-10T12:00:00Z', 'America/New_York') // true
+ * ```
  */
 export function isNearTransition(
   date: DateInput,
@@ -308,7 +361,8 @@ export function onTick(callback: (now: Date) => void, granularityMs: number = 10
 }
 
 /**
- * Cleanup all active watchers (useful for testing or app shutdown)
+ * Stop every watcher started by {@link watchZoneTransitions} and {@link onTick},
+ * for example in test teardown or on shutdown.
  */
 export function cleanupAllWatchers(): void {
   for (const cleanup of activeWatchers) {
@@ -323,7 +377,12 @@ export function cleanupAllWatchers(): void {
 }
 
 /**
- * Get statistics about active watchers
+ * How many {@link watchZoneTransitions} and {@link onTick} watchers are running.
+ *
+ * @example
+ * ```ts
+ * getWatcherStats() // { transitionWatchers: 0, tickWatchers: 0 }
+ * ```
  */
 export function getWatcherStats(): {
   transitionWatchers: number
