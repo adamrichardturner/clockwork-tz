@@ -16,6 +16,12 @@ export function detectEnvironment(): Environment {
   const hasBroadcastChannel = typeof BroadcastChannel !== 'undefined'
 
   const hasLocalStorage = (() => {
+    // Node 25+ defines a localStorage getter that prints an ExperimentalWarning
+    // when touched (even by typeof) unless --localstorage-file is set, so
+    // server-side Node uses the in-memory cache without probing it
+    if (isNode && !isBrowser) {
+      return false
+    }
     try {
       return typeof localStorage !== 'undefined' && localStorage !== null
     } catch {
