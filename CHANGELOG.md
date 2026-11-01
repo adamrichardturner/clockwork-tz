@@ -1,10 +1,11 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
-[Semantic Versioning](https://semver.org/).
+All notable changes to this project are documented here. The project uses
+[Semantic Versioning](https://semver.org/). New entries are generated from
+[Conventional Commits](https://www.conventionalcommits.org/) by the Release workflow when
+changes are merged to `main`.
 
-## [1.0.0] - Unreleased
+## [1.0.0](https://github.com/adamrichardturner/clockworktz/releases/tag/v1.0.0) - 2026-11-01
 
 First release.
 
@@ -32,5 +33,3 @@ First release.
 - Every error is a `TimezoneError`.
 - The tzdb build verifies IANA's signatures on its downloads, and CI checks the committed
   data rebuilds byte for byte.
-
-[1.0.0]: https://github.com/adamrichardturner/clockworktz/commits/main

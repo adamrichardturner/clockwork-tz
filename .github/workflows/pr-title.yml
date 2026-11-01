@@ -1,0 +1,28 @@
+name: PR title
+
+# Squash merges use the pull request title as the commit message, and the
+# Release workflow reads commit messages to decide the next version, so titles
+# must follow Conventional Commits.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the title follows Conventional Commits
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if echo "$TITLE" | grep -Eq '^(feat|fix|perf|docs|ci|chore|test|build|refactor|style|revert)(\([a-z0-9._/-]+\))?!?: .+'; then
+            echo "OK: $TITLE"
+          else
+            echo "::error::PR title must follow Conventional Commits, e.g. 'feat: add X', 'fix(tzdb): Y', 'docs: Z'. Got: $TITLE"
+            echo "feat → minor release, fix/perf → patch, '!' or 'BREAKING CHANGE' → major, others → no release."
+            exit 1
+          fi
