@@ -13,8 +13,8 @@ jobs:
     name: Lint, typecheck and build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: 'npm'
@@ -24,7 +24,7 @@ jobs:
       - run: npm run format:check
       - run: npm run build
       - run: npm run check:pkg
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: dist
           path: dist
@@ -40,8 +40,8 @@ jobs:
     env:
       TZ: ${{ matrix.tz }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
@@ -52,8 +52,8 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: 'npm'
@@ -68,8 +68,8 @@ jobs:
     name: Browsers
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: 'npm'
@@ -82,18 +82,19 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         node-version: [20, 22, 24]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: 'npm'
       - run: npm ci
       - run: npm run build
       - run: npm pack
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
       - name: Install tarball into a fresh project
@@ -135,7 +136,7 @@ jobs:
           const d: TzdbData = tzdb
           console.log(t.utc, d.version)
           TS
-          npx tsc --noEmit --strict --module node16 --moduleResolution node16 types.mts
+          npx tsc --ignoreConfig --noEmit --strict --module node16 --moduleResolution node16 types.mts
       - name: Run Node example
         if: matrix.node-version == 24
         run: timeout 30 node examples/node.mjs
@@ -144,8 +145,8 @@ jobs:
     name: Security audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: 'npm'
