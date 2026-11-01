@@ -54,8 +54,42 @@ After that, every release goes through the tag-driven workflow below.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/). To release:
 
-1. Bump `version` in `package.json` and update `CHANGELOG.md`.
-2. Push a `v<version>` tag.
+1. Bump `version` in `package.json` (`npm version patch|minor|major --no-git-tag-version`) and
+   move the `Unreleased` notes in `CHANGELOG.md` under the new version.
+2. Merge that to `main`, then tag the merge commit and push the tag:
 
-The Release workflow publishes to npm with provenance. Prereleases go to the `alpha`, `beta`
-or `rc` dist-tag.
+   ```bash
+   git checkout main && git pull
+   git tag v1.0.1 && git push origin v1.0.1
+   ```
+
+The Release workflow checks the tag matches `package.json`, runs every check, publishes to npm
+with provenance and creates the GitHub release. Prereleases (`1.1.0-beta.1`) go to the `alpha`,
+`beta`, `rc` or `next` dist-tag instead of `latest`.
+
+To test the release pipeline without publishing, run it by hand. Manual runs are always dry
+runs:
+
+```bash
+gh workflow run release.yml
+```
+
+## Timezone data updates
+
+The TZDB Update workflow runs daily. When IANA publishes a new release it:
+
+1. builds it, verifying IANA's signatures
+2. signs it with the `TZDB_SIGNING_KEY` secret and tests the library against it
+3. publishes `clockwork-tz-data` (so running apps get the update through the signed manifest)
+4. opens a `feat(tzdb): …` pull request with the new bundled snapshot, and starts CI on it
+
+Merge that pull request, then release a patch version so new installs bundle the new data.
+
+If **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**
+is off, the workflow opens an issue with a link to create the pull request instead.
+
+To test the pipeline end to end without publishing anything:
+
+```bash
+gh workflow run tzdb-update.yml -f dry_run=true
+```

@@ -75,7 +75,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test:run && npm run check:pkg",
-    "check:pkg": "publint && attw --pack . --profile node16",
+    "check:pkg": "publint && npm_config_dry_run=false attw --pack . --profile node16",
     "build:tzdb": "node scripts/build-tzdb.ts",
     "test:browser": "vitest run --project browser",
     "test:coverage": "vitest run --project node --coverage"

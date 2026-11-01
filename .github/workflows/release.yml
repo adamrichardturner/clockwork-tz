@@ -3,6 +3,13 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run every release step except publishing (npm publish --dry-run, no GitHub release)'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -20,12 +27,22 @@ jobs:
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Check tag matches package version
+      # Trusted publishing (OIDC) needs npm 11.5.1 or later
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Resolve version and dist-tag
         id: meta
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
             echo "Tag $GITHUB_REF_NAME does not match package.json version $VERSION" >&2
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" != "true" ]; then
+            echo "Manual runs are dry runs only; push a v$VERSION tag to release" >&2
             exit 1
           fi
           case "$VERSION" in
@@ -35,7 +52,10 @@ jobs:
             *-*) TAG=next ;;
             *) TAG=latest ;;
           esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "dist_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${DRY_RUN:-false}" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION with dist-tag $TAG (dry run: ${DRY_RUN:-false})"
 
       - run: npm ci
       - run: npm run typecheck
@@ -44,21 +64,31 @@ jobs:
       - run: npm run build
       - run: npm run check:pkg
 
-      # Uses npm trusted publishing (OIDC); configure it for this workflow on npmjs.com.
+      # Uses npm trusted publishing (OIDC): link this workflow with `npm trust github`.
       # Skipped when the version is already on npm (e.g. a first release published by hand).
+      # --ignore-scripts: prepublishOnly would repeat the checks above.
       - name: Publish
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          DIST_TAG: ${{ steps.meta.outputs.dist_tag }}
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if npm view "clockwork-tz@$VERSION" version > /dev/null 2>&1; then
+          if [ "${{ steps.meta.outputs.dry_run }}" = "true" ]; then
+            npm publish --dry-run --ignore-scripts --access public --provenance=false --tag "$DIST_TAG"
+          elif npm view "clockwork-tz@$VERSION" version > /dev/null 2>&1; then
             echo "clockwork-tz@$VERSION is already published; skipping"
           else
-            npm publish --provenance --access public --tag ${{ steps.meta.outputs.dist_tag }}
+            npm publish --ignore-scripts --provenance --access public --tag "$DIST_TAG"
           fi
 
       - name: GitHub release
+        if: steps.meta.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists"
+            exit 0
+          fi
           PRERELEASE=""
           if [ "${{ steps.meta.outputs.dist_tag }}" != "latest" ]; then PRERELEASE="--prerelease"; fi
-          gh release create "$GITHUB_REF_NAME" --generate-notes $PRERELEASE
+          gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag $PRERELEASE

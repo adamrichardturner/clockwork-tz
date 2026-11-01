@@ -4,6 +4,8 @@ on:
   push:
     branches: [main, develop]
   pull_request:
+  # Started by the TZDB Update workflow for its pull requests (GITHUB_TOKEN events don't trigger CI)
+  workflow_dispatch:
 
 permissions:
   contents: read
