@@ -3,6 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/clockwork-tz.svg)](https://www.npmjs.com/package/clockwork-tz)
 [![CI](https://github.com/adamrichardturner/clockwork-tz/actions/workflows/ci.yml/badge.svg)](https://github.com/adamrichardturner/clockwork-tz/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Docs](https://img.shields.io/badge/docs-clockworktz.dev-b45309)](https://clockworktz.dev/docs)
 
 Timezone conversions that get the weird zones right. clockwork-tz handles half-hour and
 45-minute offsets, 30-minute DST, skipped days, negative DST and historical local mean time,
@@ -15,6 +16,9 @@ and it resolves local times inside DST gaps and overlaps exactly the way
   pinned IANA tzdb release (28 kB gzipped) for identical results everywhere, with optional
   signed updates.
 - **ESM + CommonJS** with complete TypeScript types.
+
+**[Documentation](https://clockworktz.dev/docs)** · [Quick start](https://clockworktz.dev/docs/getting-started)
+· [API reference](https://clockworktz.dev/docs/api) · [Recipes](https://clockworktz.dev/docs/recipes)
 
 ## Installation
 
@@ -89,6 +93,8 @@ interpretLocal('2011-12-30T12:00:00', 'Pacific/Apia').local // '2011-12-31 12:00
 This works the same for 30-minute DST (Lord Howe), 45-minute offsets (Chatham) and two-hour
 DST (Antarctica/Troll).
 
+See the [DST guide](https://clockworktz.dev/docs/dst-disambiguation) for choosing a strategy.
+
 ## Engines
 
 ### `system-intl` (default)
@@ -141,6 +147,8 @@ Anything else keeps the current data. Verified data is cached per manifest and k
 through `BroadcastChannel` and load it too. `onDataUpdate(version => …)` fires whenever new
 data is loaded. If you host your own data, pass `publicKey`. See [SECURITY.md](./SECURITY.md)
 for the signing details.
+
+See [Engines & tzdb data](https://clockworktz.dev/docs/engines) for a full comparison.
 
 ## API
 
@@ -238,6 +246,8 @@ in place. Otherwise it returns a promise that settles once any manifest load has
 attempted. Also: `dispose()` (stops auto-updates and cross-tab listening), `engine()`,
 `tzdbVersion()`, `getStatus()`, `onDataUpdate(callback)`, `refreshTimezoneData()`,
 `setEngine(engine)` and `getCurrentEngine()`.
+
+Every export, with types, is in the [API reference](https://clockworktz.dev/docs/api).
 
 ## Unusual zones covered by the test suite
 
