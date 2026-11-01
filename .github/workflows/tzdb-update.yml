@@ -116,8 +116,8 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           branch: tzdb-update-${{ steps.versions.outputs.latest }}
-          commit-message: 'feat(tzdb): update bundled data to ${{ steps.versions.outputs.latest }}'
-          title: 'feat(tzdb): update bundled data to ${{ steps.versions.outputs.latest }}'
+          commit-message: 'fix(tzdb): update bundled data to ${{ steps.versions.outputs.latest }}'
+          title: 'fix(tzdb): update bundled data to ${{ steps.versions.outputs.latest }}'
           body: |
             Updates the bundled IANA timezone database from ${{ steps.versions.outputs.current }} to ${{ steps.versions.outputs.latest }}.
 
@@ -127,7 +127,7 @@ jobs:
 
             Release notes: https://data.iana.org/time-zones/tzdb/NEWS
 
-            After merging, release the library (bump the patch version and push a tag) so new installs get the new snapshot.
+            Merging this releases a patch version of `clockworktz` automatically, so new installs bundle the new data.
 
       # Pull requests opened with GITHUB_TOKEN don't trigger other workflows, so start CI explicitly
       - name: Run CI on the pull request branch

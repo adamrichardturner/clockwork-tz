@@ -26,52 +26,51 @@ for z in UTC America/New_York Australia/Lord_Howe Asia/Kathmandu; do TZ=$z npm r
 compiler and network access. The scheduled TZDB Update workflow does this automatically,
 signs the data and opens a pull request.
 
-## First release
-
-npm trusted publishing can only be configured for a package that already exists, so the
-first publish of each package is done by hand from a logged-in maintainer:
-
-1. Publish the data package, then link it to the TZDB Update workflow:
-
-   ```bash
-   (cd packages/clockworktz-data && npm publish --access public --provenance=false)
-   npm trust github @adamrichardturner/clockworktz-data --repo adamrichardturner/clockworktz --file tzdb-update.yml --allow-publish
-   ```
-
-2. Publish the library, then link it to the Release workflow:
-
-   ```bash
-   npm run prepublishOnly && npm publish --access public --provenance=false
-   npm trust github clockworktz --repo adamrichardturner/clockworktz --file release.yml --allow-publish
-   ```
-
-   Then push the matching `v<version>` tag. The Release workflow sees the version is already
-   on npm, skips publishing, and creates the GitHub release.
-
-After that, every release goes through the tag-driven workflow below.
-
 ## Commits and releases
 
-Commits follow [Conventional Commits](https://www.conventionalcommits.org/). To release:
+Releases are automatic. Every merge to `main` runs the Release workflow. It reads the
+[Conventional Commits](https://www.conventionalcommits.org/) since the last `v*` tag and
+picks the next version:
 
-1. Bump `version` in `package.json` (`npm version patch|minor|major --no-git-tag-version`) and
-   move the `Unreleased` notes in `CHANGELOG.md` under the new version.
-2. Merge that to `main`, then tag the merge commit and push the tag:
+| Commit                                             | Release               |
+| -------------------------------------------------- | --------------------- |
+| `fix: …`, `perf: …`                                | patch (1.0.0 → 1.0.1) |
+| `feat: …`                                          | minor (1.0.0 → 1.1.0) |
+| `feat!: …`, or a `BREAKING CHANGE: …` footer       | major (1.0.0 → 2.0.0) |
+| `docs`, `ci`, `chore`, `test`, `build`, `refactor` | no release            |
 
-   ```bash
-   git checkout main && git pull
-   git tag v1.0.1 && git push origin v1.0.1
-   ```
+When there's something to release, the workflow:
 
-The Release workflow checks the tag matches `package.json`, runs every check, publishes to npm
-with provenance and creates the GitHub release. Prereleases (`1.1.0-beta.1`) go to the `alpha`,
-`beta`, `rc` or `next` dist-tag instead of `latest`.
+1. runs every check (typecheck, lint, format, tests, build, package checks)
+2. bumps `package.json`, adds a `CHANGELOG.md` section, and commits `chore(release): vX.Y.Z`
+   with a matching tag to `main`
+3. publishes `clockworktz` to npm with provenance, through npm trusted publishing (no token)
+4. creates the GitHub release with the generated notes
 
-To test the release pipeline without publishing, run it by hand. Manual runs are always dry
-runs:
+So to ship a change, give its commits (or the PR title, for squash merges) the right type,
+and merge. The PR title check enforces the format.
+
+To release a specific version, set `version` in `package.json` by hand in your PR. A version
+above the last tag is released as-is.
+
+See what the next merge would release, without committing or publishing:
 
 ```bash
 gh workflow run release.yml
+```
+
+If a run fails after tagging (for example, npm was down), run it again for real. It
+publishes the tagged version npm doesn't have yet:
+
+```bash
+gh workflow run release.yml -f dry_run=false
+```
+
+Trusted publishing is linked to `.github/workflows/release.yml`, so keep that file name. If
+npm ever needs re-linking:
+
+```bash
+npm trust github clockworktz --repo adamrichardturner/clockworktz --file release.yml --allow-publish
 ```
 
 ## Timezone data updates
@@ -81,9 +80,10 @@ The TZDB Update workflow runs daily. When IANA publishes a new release it:
 1. builds it, verifying IANA's signatures
 2. signs it with the `TZDB_SIGNING_KEY` secret and tests the library against it
 3. publishes `@adamrichardturner/clockworktz-data` (so running apps get the update through the signed manifest)
-4. opens a `feat(tzdb): …` pull request with the new bundled snapshot, and starts CI on it
+4. opens a `fix(tzdb): …` pull request with the new bundled snapshot, and starts CI on it
 
-Merge that pull request, then release a patch version so new installs bundle the new data.
+Merging that pull request releases a patch version automatically, so new installs bundle
+the new data.
 
 If **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**
 is off, the workflow opens an issue with a link to create the pull request instead.
