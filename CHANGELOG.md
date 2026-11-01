@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The project uses
 [Conventional Commits](https://www.conventionalcommits.org/) by the Release workflow when
 changes are merged to `main`.
 
+## [1.0.2](https://github.com/adamrichardturner/clockworktz/compare/v1.0.1...v1.0.2) - 2026-11-01
+
+### Fixes
+
+- make the README's country examples accurate on any date and engine (#11) ([0cf261d](https://github.com/adamrichardturner/clockworktz/commit/0cf261d2d7d9f54f13db098cbf3e852c91ce3c87))
+
 ## [1.0.1](https://github.com/adamrichardturner/clockworktz/compare/v1.0.0...v1.0.1) - 2026-11-01
 
 ### Fixes
