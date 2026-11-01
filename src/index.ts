@@ -1,22 +1,21 @@
 /**
  * clockwork-tz - Accurate timezone conversions and DST handling
  *
- * @author Adam Turner
- * @version 0.1.0
  * @license MIT
  */
 
-// Re-export all public API functions
 export {
   initClockworkTZ,
+  dispose,
   engine,
   tzdbVersion,
   getUserTimeZone,
   isValidTimeZone,
+  canonicalizeTimeZone,
   fromUTC,
   interpretLocal,
   convert,
-  format,
+  getZoneInfo,
   getOffset,
   isDST,
   listTimeZones,
@@ -30,42 +29,24 @@ export {
   getStatus,
 } from './api.js'
 
-// Import for default export
-import {
-  initClockworkTZ,
-  engine,
-  tzdbVersion,
-  getUserTimeZone,
-  isValidTimeZone,
-  fromUTC,
-  interpretLocal,
-  convert,
-  format,
-  getOffset,
-  isDST,
-  listTimeZones,
-  onDataUpdate,
-  watchZoneTransitions,
-  onTick,
-  getStatus,
-} from './api.js'
-import { parseDate, normalize as normalizeToDate } from './parse.js'
-
-// Re-export all public types
 export type {
   EngineKind,
   Disambiguation,
+  DateInput,
   ClockworkTime,
+  ZoneInfo,
+  Transition,
   ListOptions,
   TimeZoneItem,
   ClockworkOptions,
   FormatOptions,
   ConvertOptions,
   TzEngine,
+  LoadableEngine,
   LabelStyle,
+  TzdbManifest,
 } from './data/types.js'
 
-// Re-export error classes
 export {
   TimezoneError,
   AmbiguousTimeError,
@@ -73,9 +54,8 @@ export {
   NotImplementedError,
 } from './data/types.js'
 
-// Re-export formatting utilities
 export {
-  format as formatTime,
+  format,
   formatWithPattern,
   formatNow,
   formatFor,
@@ -88,7 +68,6 @@ export {
   DEFAULT_FORMAT_PATTERN,
 } from './format.js'
 
-// Re-export parsing utilities
 export {
   parse,
   parseDate,
@@ -101,95 +80,34 @@ export {
   parseOffset,
   normalize,
 } from './parse.js'
-
-// Re-export parsing types
 export type { ParseResult, ParseOptions } from './parse.js'
 
-// Re-export ISO types
+export { isValidISOString, isValidLocalISOString } from './utils/iso.js'
 export type { DateComponents } from './utils/iso.js'
 
-// Re-export transition utilities
 export {
   getNextTransition,
   getPreviousTransition,
+  getTransitions,
   isNearTransition,
   cleanupAllWatchers,
   getWatcherStats,
 } from './transitions.js'
+export type { TransitionInfo } from './transitions.js'
 
-// Re-export environment utilities
-export {
-  detectEnvironment,
-  getCacheStorage,
-  createBroadcastChannel,
-  getEnvironment,
-  isSecureContext,
-} from './utils/env.js'
-
-// Re-export ISO utilities
-export {
-  parseISODate,
-  isValidISOString,
-  isValidLocalISOString,
-  parseLocalISOString,
-  componentsToDate,
-  formatAsUTC,
-  formatAsLocalISO,
-  normalizeToDate,
-  isLeapYear,
-  getDaysInMonth,
-  validateDateComponents,
-  addMilliseconds,
-  diffInMilliseconds,
-} from './utils/iso.js'
-
-// Re-export data updater utilities
 export {
   ensureFreshTzdb,
+  verifyManifestSignature,
+  compareTzdbVersions,
   clearCache,
   getCacheStats,
   DEFAULT_MANIFEST_URL,
-  CACHE_KEY_PREFIX,
-  BROADCAST_CHANNEL_NAME,
+  DEFAULT_PUBLIC_KEY,
 } from './data/updater.js'
+export type { EnsureFreshOptions } from './data/updater.js'
 
-// Re-export engine constructors for advanced usage
-export { createSystemIntlEngine } from './engines/systemIntl.js'
+export { createSystemIntlEngine, SystemIntlEngine } from './engines/systemIntl.js'
+export { createEmbeddedTzdbEngine, EmbeddedTzdbEngine } from './engines/embeddedTzdb.js'
 
-export { createEmbeddedTzdbEngine } from './engines/embeddedTzdb.js'
-
-// Version information
-export const VERSION = '0.1.0'
-
-/**
- * Default export for convenience
- */
-export default {
-  // Core API
-  init: initClockworkTZ,
-  engine,
-  tzdbVersion,
-  getUserTimeZone,
-  isValidTimeZone,
-  fromUTC,
-  interpretLocal,
-  convert,
-  format,
-  getOffset,
-  isDST,
-  listTimeZones,
-
-  // Event handling
-  onDataUpdate,
-  watchZoneTransitions,
-  onTick,
-
-  // Utilities
-  formatTime: format,
-  parseDate,
-  normalize: normalizeToDate,
-
-  // Status
-  getStatus,
-  VERSION,
-}
+/** Library version */
+export const VERSION: string = __VERSION__

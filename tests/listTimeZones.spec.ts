@@ -237,7 +237,7 @@ describe('Timezone Listing', () => {
 
       zones.forEach(zone => {
         // IANA timezone format: Area/Location or Area/Location/Sublocation
-        expect(zone.value).toMatch(/^[A-Z][a-z]+\/[A-Z][A-Za-z_]+(?:\/[A-Z][A-Za-z_]+)?$|^UTC$/)
+        expect(zone.value).toMatch(/^[A-Z][A-Za-z]+\/[A-Za-z0-9_+-]+(?:\/[A-Za-z0-9_+-]+)?$|^UTC$/)
 
         // Should not have spaces
         expect(zone.value).not.toContain(' ')

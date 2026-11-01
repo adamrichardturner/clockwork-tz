@@ -1,17 +1,104 @@
 /**
- * System Intl engine implementation using platform Intl API and date-fns-tz
+ * System Intl engine: timezone data comes from the platform's Intl API
+ * (ICU in Node and browsers). No dependencies and no data to ship.
  */
 
-import { formatInTimeZone, toZonedTime, fromZonedTime } from 'date-fns-tz'
-import type {
-  TzEngine,
-  ClockworkTime,
-  Disambiguation,
-  ListOptions,
-  TimeZoneItem,
-} from '../data/types.js'
-import { TimezoneError, AmbiguousTimeError, InvalidTimeError } from '../data/types.js'
-import { parseLocalISOString, componentsToDate, formatAsUTC } from '../utils/iso.js'
+import type { TzEngine, ZoneInfo } from '../data/types.js'
+import { TimezoneError } from '../data/types.js'
+
+/**
+ * Curated fallback list for runtimes without Intl.supportedValuesOf
+ */
+const FALLBACK_ZONES = [
+  'UTC',
+  'Africa/Cairo',
+  'Africa/Casablanca',
+  'Africa/Johannesburg',
+  'Africa/Lagos',
+  'Africa/Nairobi',
+  'America/Anchorage',
+  'America/Argentina/Buenos_Aires',
+  'America/Bogota',
+  'America/Caracas',
+  'America/Chicago',
+  'America/Denver',
+  'America/Halifax',
+  'America/Lima',
+  'America/Los_Angeles',
+  'America/Mexico_City',
+  'America/New_York',
+  'America/Santiago',
+  'America/Sao_Paulo',
+  'America/St_Johns',
+  'America/Toronto',
+  'America/Vancouver',
+  'Asia/Bangkok',
+  'Asia/Colombo',
+  'Asia/Dhaka',
+  'Asia/Dubai',
+  'Asia/Hong_Kong',
+  'Asia/Jakarta',
+  'Asia/Karachi',
+  'Asia/Kathmandu',
+  'Asia/Kolkata',
+  'Asia/Seoul',
+  'Asia/Shanghai',
+  'Asia/Singapore',
+  'Asia/Tehran',
+  'Asia/Tokyo',
+  'Australia/Adelaide',
+  'Australia/Brisbane',
+  'Australia/Darwin',
+  'Australia/Eucla',
+  'Australia/Lord_Howe',
+  'Australia/Perth',
+  'Australia/Sydney',
+  'Europe/Amsterdam',
+  'Europe/Athens',
+  'Europe/Berlin',
+  'Europe/Dublin',
+  'Europe/Istanbul',
+  'Europe/London',
+  'Europe/Madrid',
+  'Europe/Moscow',
+  'Europe/Paris',
+  'Pacific/Apia',
+  'Pacific/Auckland',
+  'Pacific/Chatham',
+  'Pacific/Honolulu',
+  'Pacific/Kiritimati',
+  'Pacific/Marquesas',
+]
+
+/**
+ * ICU (CLDR) keeps legacy spellings as canonical for some zones; map them to
+ * the primary IANA identifiers so both engines agree on names.
+ */
+const CLDR_TO_IANA: Record<string, string> = {
+  'Africa/Asmera': 'Africa/Asmara',
+  'America/Buenos_Aires': 'America/Argentina/Buenos_Aires',
+  'America/Catamarca': 'America/Argentina/Catamarca',
+  'America/Coral_Harbour': 'America/Atikokan',
+  'America/Cordoba': 'America/Argentina/Cordoba',
+  'America/Godthab': 'America/Nuuk',
+  'America/Indianapolis': 'America/Indiana/Indianapolis',
+  'America/Jujuy': 'America/Argentina/Jujuy',
+  'America/Louisville': 'America/Kentucky/Louisville',
+  'America/Mendoza': 'America/Argentina/Mendoza',
+  'Asia/Calcutta': 'Asia/Kolkata',
+  'Asia/Katmandu': 'Asia/Kathmandu',
+  'Asia/Rangoon': 'Asia/Yangon',
+  'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+  'Atlantic/Faeroe': 'Atlantic/Faroe',
+  'Europe/Kiev': 'Europe/Kyiv',
+  'Pacific/Enderbury': 'Pacific/Kanton',
+  'Pacific/Ponape': 'Pacific/Pohnpei',
+  'Pacific/Truk': 'Pacific/Chuuk',
+}
+
+function toIana(zone: string): string {
+  return CLDR_TO_IANA[zone] ?? zone
+}
 
 /**
  * System Intl timezone engine using platform APIs
@@ -19,352 +106,153 @@ import { parseLocalISOString, componentsToDate, formatAsUTC } from '../utils/iso
 export class SystemIntlEngine implements TzEngine {
   readonly kind = 'system-intl' as const
 
+  private readonly wallFormatters = new Map<string, Intl.DateTimeFormat>()
+  private readonly abbrevFormatters = new Map<string, Intl.DateTimeFormat>()
+  private readonly validity = new Map<string, boolean>()
+  private readonly standardOffsets = new Map<string, number>()
+
   getVersion(): string | undefined {
-    // System Intl doesn't have a version
     return undefined
   }
 
   isValidTimeZone(zone: string): boolean {
-    try {
-      // Try to create a DateTimeFormat with the zone
-      new Intl.DateTimeFormat('en', { timeZone: zone })
-      return true
-    } catch {
+    if (typeof zone !== 'string' || zone.trim() === '') {
       return false
     }
-  }
-
-  getUserTimeZone(): string {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone
-    } catch {
-      // Fallback for older environments
-      return 'UTC'
-    }
-  }
-
-  fromUTC(utc: Date, zone: string): ClockworkTime {
-    if (!this.isValidTimeZone(zone)) {
-      throw new TimezoneError(`Invalid timezone: ${zone}`)
-    }
-
-    const offsetMinutes = this.getOffset(utc, zone)
-    const isDST = this.isDST(utc, zone)
-    const local = formatInTimeZone(utc, zone, 'yyyy-MM-dd HH:mm:ss.SSS')
-
-    return {
-      utc: formatAsUTC(utc),
-      zone,
-      local,
-      offsetMinutes,
-      isDST,
-      source: this.kind,
-    }
-  }
-
-  interpretLocal(localISO: string, zone: string, disambiguation: Disambiguation): ClockworkTime {
-    if (!this.isValidTimeZone(zone)) {
-      throw new TimezoneError(`Invalid timezone: ${zone}`)
-    }
-
-    try {
-      const components = parseLocalISOString(localISO)
-      const localDate = componentsToDate(components)
-
-      // Check for invalid time (spring forward gap)
-      const utcFromLocal = fromZonedTime(localDate, zone)
-      const backToLocal = toZonedTime(utcFromLocal, zone)
-
-      // If the round trip doesn't match, we have an invalid or ambiguous time
-      const originalMs = localDate.getTime()
-      const roundTripMs = backToLocal.getTime()
-
-      if (Math.abs(originalMs - roundTripMs) > 1000) {
-        // Check if it's invalid (spring forward) or ambiguous (fall back)
-        const hourBefore = new Date(localDate.getTime() - 60 * 60 * 1000)
-        const hourAfter = new Date(localDate.getTime() + 60 * 60 * 1000)
-
-        try {
-          const utcBefore = fromZonedTime(hourBefore, zone)
-          const utcAfter = fromZonedTime(hourAfter, zone)
-          const offsetBefore = this.getOffset(utcBefore, zone)
-          const offsetAfter = this.getOffset(utcAfter, zone)
-
-          if (offsetBefore !== offsetAfter) {
-            // We're in a transition period
-            if (offsetBefore < offsetAfter) {
-              // Spring forward - invalid time
-              if (disambiguation === 'reject') {
-                throw new InvalidTimeError(localISO, zone)
-              }
-              // Use the time after the gap
-              const adjustedLocal = new Date(
-                localDate.getTime() + (offsetAfter - offsetBefore) * 60 * 1000
-              )
-              return this.fromUTC(fromZonedTime(adjustedLocal, zone), zone)
-            } else {
-              // Fall back - ambiguous time
-              if (disambiguation === 'reject') {
-                throw new AmbiguousTimeError(localISO, zone)
-              }
-
-              // For ambiguous times, we need to choose between two possible UTC times
-              const earlierUtc = new Date(
-                utcFromLocal.getTime() - Math.abs(offsetBefore - offsetAfter) * 60 * 1000
-              )
-              const laterUtc = utcFromLocal
-
-              const targetUtc = disambiguation === 'earliest' ? earlierUtc : laterUtc
-              return this.fromUTC(targetUtc, zone)
-            }
-          }
-        } catch {
-          // If we can't determine the transition, fall back to the original interpretation
-        }
-      }
-
-      return this.fromUTC(utcFromLocal, zone)
-    } catch (error) {
-      if (error instanceof InvalidTimeError || error instanceof AmbiguousTimeError) {
-        throw error
-      }
-      throw new TimezoneError(
-        `Failed to interpret local time "${localISO}" in zone "${zone}": ${error}`
-      )
-    }
-  }
-
-  getOffset(time: Date, zone: string): number {
-    if (!this.isValidTimeZone(zone)) {
-      throw new TimezoneError(`Invalid timezone: ${zone}`)
-    }
-
-    try {
-      // Use formatInTimeZone to get the local time, then compare with UTC
-      const zonedTime = toZonedTime(time, zone)
-      const utcTime = time
-
-      // Calculate offset in minutes
-      const offsetMs = zonedTime.getTime() - utcTime.getTime()
-      return Math.round(offsetMs / (60 * 1000))
-    } catch {
-      // Fallback: try using Intl.DateTimeFormat with shortOffset
+    let valid = this.validity.get(zone)
+    if (valid === undefined) {
       try {
-        const formatter = new Intl.DateTimeFormat('en', {
-          timeZone: zone,
-          timeZoneName: 'shortOffset',
-        })
-
-        const parts = formatter.formatToParts(time)
-        const offsetPart = parts.find(part => part.type === 'timeZoneName')
-
-        if (offsetPart?.value) {
-          return this.parseOffsetString(offsetPart.value)
-        }
+        new Intl.DateTimeFormat('en-US', { timeZone: zone })
+        valid = true
       } catch {
-        // Final fallback - return 0
+        valid = false
       }
+      this.validity.set(zone, valid)
+    }
+    return valid
+  }
 
-      return 0
+  canonicalize(zone: string): string {
+    this.assertValid(zone)
+    return toIana(new Intl.DateTimeFormat('en-US', { timeZone: zone }).resolvedOptions().timeZone)
+  }
+
+  listZoneIds(): string[] {
+    const supportedValuesOf = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] })
+      .supportedValuesOf
+    if (typeof supportedValuesOf === 'function') {
+      try {
+        const zones = new Set(supportedValuesOf('timeZone').map(toIana))
+        zones.add('UTC')
+        return [...zones].filter(zone => this.isValidTimeZone(zone))
+      } catch {
+        // Fall through to curated list
+      }
+    }
+    return [...FALLBACK_ZONES]
+  }
+
+  getZoneInfo(epochMs: number, zone: string): ZoneInfo {
+    this.assertValid(zone)
+    const offsetSeconds = this.offsetSeconds(epochMs, zone)
+    return {
+      offsetSeconds,
+      isDST: offsetSeconds > this.standardOffsetForYear(epochMs, zone),
+      abbreviation: this.abbreviation(epochMs, zone),
     }
   }
 
-  isDST(time: Date, zone: string): boolean {
-    if (!this.isValidTimeZone(zone)) {
-      return false
-    }
-
-    try {
-      // Compare offset with January (assumed standard time)
-      const january = new Date(time.getFullYear(), 0, 1)
-      const currentOffset = this.getOffset(time, zone)
-      const winterOffset = this.getOffset(january, zone)
-
-      // DST typically means a higher offset (more positive)
-      return currentOffset > winterOffset
-    } catch {
-      return false
-    }
-  }
-
-  listTimeZones(options: ListOptions = {}): TimeZoneItem[] {
-    const { labelStyle = 'original', forZone } = options
-
-    // Get common timezone identifiers
-    const commonZones = this.getCommonTimeZones()
-    const now = new Date()
-
-    return commonZones
-      .map(zone => {
-        const offsetMinutes = this.getOffset(now, zone)
-        const label = this.formatZoneLabel(zone, offsetMinutes, labelStyle, forZone)
-
-        return {
-          value: zone,
-          label,
-          offsetMinutes,
-        }
-      })
-      .sort((a, b) => {
-        // Sort by offset, then by name
-        if (a.offsetMinutes !== b.offsetMinutes) {
-          return a.offsetMinutes - b.offsetMinutes
-        }
-        return a.value.localeCompare(b.value)
-      })
-  }
-
-  format(time: Date, zone: string, pattern: string): string {
+  private assertValid(zone: string): void {
     if (!this.isValidTimeZone(zone)) {
       throw new TimezoneError(`Invalid timezone: ${zone}`)
     }
-
-    try {
-      return formatInTimeZone(time, zone, pattern)
-    } catch (error) {
-      throw new TimezoneError(`Failed to format time in zone "${zone}": ${error}`)
-    }
   }
 
-  private parseOffsetString(offsetStr: string): number {
-    // Parse offset strings like "+10:30", "-05:00", "GMT+5"
-    const match = offsetStr.match(/([+-])(\d{1,2}):?(\d{2})?/)
-    if (!match) {
-      return 0
+  /**
+   * Offset in seconds: wall time in the zone (read as UTC) minus the instant
+   */
+  private offsetSeconds(epochMs: number, zone: string): number {
+    let formatter = this.wallFormatters.get(zone)
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: zone,
+        hourCycle: 'h23',
+        era: 'short',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric',
+      })
+      this.wallFormatters.set(zone, formatter)
     }
 
-    const [, sign, hours, minutes = '0'] = match
-    const offsetMinutes = parseInt(hours!, 10) * 60 + parseInt(minutes ?? '0', 10)
-    return sign === '+' ? offsetMinutes : -offsetMinutes
-  }
-
-  private formatZoneLabel(
-    zone: string,
-    offsetMinutes: number,
-    style: string,
-    _forZone?: string
-  ): string {
-    const offsetHours = Math.floor(Math.abs(offsetMinutes) / 60)
-    const offsetMins = Math.abs(offsetMinutes) % 60
-    const offsetSign = offsetMinutes >= 0 ? '+' : '-'
-    const offsetStr = `${offsetSign}${offsetHours.toString().padStart(2, '0')}:${offsetMins.toString().padStart(2, '0')}`
-
-    switch (style) {
-      case 'offset': {
-        return `(UTC${offsetStr}) ${zone}`
-      }
-      case 'abbrev': {
-        try {
-          const formatter = new Intl.DateTimeFormat('en', {
-            timeZone: zone,
-            timeZoneName: 'short',
-          })
-          const parts = formatter.formatToParts(new Date())
-          const abbrev = parts.find(part => part.type === 'timeZoneName')?.value
-          return abbrev ? `${zone} (${abbrev})` : zone
-        } catch {
-          return zone
-        }
-      }
-      case 'altName': {
-        try {
-          const formatter = new Intl.DateTimeFormat('en', {
-            timeZone: zone,
-            timeZoneName: 'long',
-          })
-          const parts = formatter.formatToParts(new Date())
-          const longName = parts.find(part => part.type === 'timeZoneName')?.value
-          return longName && longName !== zone ? `${zone} (${longName})` : zone
-        } catch {
-          return zone
-        }
-      }
-      default: {
-        return zone
-      }
+    const wholeSecond = Math.floor(epochMs / 1000) * 1000
+    const fields: Record<string, string> = {}
+    for (const part of formatter.formatToParts(wholeSecond)) {
+      fields[part.type] = part.value
     }
+
+    let year = parseInt(fields.year ?? '1970', 10)
+    if (fields.era === 'BC' || fields.era === 'B') {
+      year = 1 - year
+    }
+    const wall = new Date(0)
+    wall.setUTCFullYear(
+      year,
+      parseInt(fields.month ?? '1', 10) - 1,
+      parseInt(fields.day ?? '1', 10)
+    )
+    wall.setUTCHours(
+      parseInt(fields.hour ?? '0', 10) % 24,
+      parseInt(fields.minute ?? '0', 10),
+      parseInt(fields.second ?? '0', 10),
+      0
+    )
+
+    return Math.round((wall.getTime() - wholeSecond) / 1000)
   }
 
-  private getCommonTimeZones(): string[] {
-    // Return a curated list of common timezone identifiers
-    return [
-      'UTC',
-      'America/New_York',
-      'America/Chicago',
-      'America/Denver',
-      'America/Los_Angeles',
-      'America/Anchorage',
-      'Pacific/Honolulu',
-      'America/St_Johns',
-      'America/Halifax',
-      'America/Toronto',
-      'America/Winnipeg',
-      'America/Edmonton',
-      'America/Vancouver',
-      'Europe/London',
-      'Europe/Paris',
-      'Europe/Berlin',
-      'Europe/Rome',
-      'Europe/Madrid',
-      'Europe/Amsterdam',
-      'Europe/Brussels',
-      'Europe/Zurich',
-      'Europe/Vienna',
-      'Europe/Prague',
-      'Europe/Warsaw',
-      'Europe/Stockholm',
-      'Europe/Oslo',
-      'Europe/Copenhagen',
-      'Europe/Helsinki',
-      'Europe/Moscow',
-      'Europe/Kiev',
-      'Europe/Istanbul',
-      'Europe/Athens',
-      'Asia/Tokyo',
-      'Asia/Seoul',
-      'Asia/Shanghai',
-      'Asia/Hong_Kong',
-      'Asia/Singapore',
-      'Asia/Bangkok',
-      'Asia/Jakarta',
-      'Asia/Manila',
-      'Asia/Taipei',
-      'Asia/Kuala_Lumpur',
-      'Asia/Kolkata',
-      'Asia/Dubai',
-      'Asia/Karachi',
-      'Asia/Dhaka',
-      'Asia/Kathmandu',
-      'Asia/Colombo',
-      'Australia/Sydney',
-      'Australia/Melbourne',
-      'Australia/Brisbane',
-      'Australia/Perth',
-      'Australia/Adelaide',
-      'Australia/Darwin',
-      'Australia/Lord_Howe',
-      'Australia/Eucla',
-      'Pacific/Auckland',
-      'Pacific/Fiji',
-      'Pacific/Chatham',
-      'Pacific/Tahiti',
-      'Pacific/Marquesas',
-      'Pacific/Pitcairn',
-      'Africa/Cairo',
-      'Africa/Lagos',
-      'Africa/Johannesburg',
-      'Africa/Nairobi',
-      'Africa/Casablanca',
-      'America/Sao_Paulo',
-      'America/Argentina/Buenos_Aires',
-      'America/Santiago',
-      'America/Lima',
-      'America/Bogota',
-      'America/Caracas',
-      'America/Mexico_City',
-      'America/Guatemala',
-      'America/Jamaica',
-    ]
+  /**
+   * Standard offset for the zone's year: the smaller of the January and July
+   * offsets. A heuristic, since Intl does not expose the DST flag; it treats
+   * the summer offset as DST even for zones (Europe/Dublin, Africa/Casablanca)
+   * whose tzdb rules model winter as negative DST.
+   */
+  private standardOffsetForYear(epochMs: number, zone: string): number {
+    const year = new Date(epochMs).getUTCFullYear()
+    const key = `${zone}|${year}`
+    let standard = this.standardOffsets.get(key)
+    if (standard === undefined) {
+      const january = Date.UTC(year, 0, 1)
+      const july = Date.UTC(year, 6, 1)
+      standard = Math.min(this.offsetSeconds(january, zone), this.offsetSeconds(july, zone))
+      if (this.standardOffsets.size > 4096) {
+        this.standardOffsets.clear()
+      }
+      this.standardOffsets.set(key, standard)
+    }
+    return standard
+  }
+
+  private abbreviation(epochMs: number, zone: string): string {
+    let formatter = this.abbrevFormatters.get(zone)
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' })
+      this.abbrevFormatters.set(zone, formatter)
+    }
+    const value = formatter.formatToParts(epochMs).find(p => p.type === 'timeZoneName')?.value
+    if (!value) {
+      return zone
+    }
+    // ICU spells unnamed offsets "GMT+5:45"; tzdb spells them "+0545"
+    const match = /^GMT([+-])(\d{1,2})(?::(\d{2}))?$/.exec(value)
+    if (match) {
+      const [, sign, hours, minutes] = match
+      return `${sign}${hours!.padStart(2, '0')}${minutes && minutes !== '00' ? minutes : ''}`
+    }
+    return value
   }
 }
 

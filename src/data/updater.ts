@@ -1,257 +1,213 @@
 /**
- * CDN updater for timezone database with caching and signature verification
+ * Signed timezone database updates with caching.
+ *
+ * A manifest names a tzdb version, the URL and SHA-256 of its data file, and an
+ * Ed25519 signature over `${version}\n${sha256}`. Data is only accepted when
+ * the signature verifies against a trusted public key and the downloaded bytes
+ * match the signed hash. Anything else keeps the data already in use.
  */
 
 import type { TzdbManifest, CachedTzdbData } from './types.js'
 import { getCacheStorage, createBroadcastChannel } from '../utils/env.js'
 
 /**
- * Default CDN URLs for timezone data
+ * Default manifest, published with the `clockwork-tz-data` package
  */
-export const DEFAULT_MANIFEST_URL = 'https://cdn.clockwork-tz.dev/manifest.json'
+export const DEFAULT_MANIFEST_URL = 'https://cdn.jsdelivr.net/npm/clockwork-tz-data@1/manifest.json'
+
+/**
+ * Raw Ed25519 public key (base64) that signs the official manifests
+ */
+export const DEFAULT_PUBLIC_KEY = 'DLvL/miUAfXKI8Sae27IuV/o5l3vbg5OIp5QMkeXLkU='
+
 export const CACHE_KEY_PREFIX = 'clockwork-tz:'
 export const BROADCAST_CHANNEL_NAME = 'clockwork-tz-updates'
 
 /**
- * Cache TTL for manifest (1 hour)
- */
-const MANIFEST_CACHE_TTL = 60 * 60 * 1000
-
-/**
- * Cache TTL for timezone data (24 hours)
+ * Cache TTL for timezone data before the manifest is checked again (24 hours)
  */
 const TZDB_CACHE_TTL = 24 * 60 * 60 * 1000
 
+const DATA_CACHE_KEY = `${CACHE_KEY_PREFIX}data`
+
+export interface EnsureFreshOptions {
+  /** Base64 raw Ed25519 public key (default: DEFAULT_PUBLIC_KEY) */
+  publicKey?: string
+  /** fetch implementation (default: globalThis.fetch) */
+  fetch?: typeof fetch
+}
+
 /**
- * Ensure fresh timezone database data is available
+ * Compare tzdb versions such as "2024a", "2024b", "2024z", "2024za"
+ */
+export function compareTzdbVersions(a: string, b: string): number {
+  const parse = (v: string) => {
+    const match = /^(\d{4})([a-z]+)$/.exec(v)
+    return match ? { year: parseInt(match[1]!, 10), letters: match[2]! } : null
+  }
+  const pa = parse(a)
+  const pb = parse(b)
+  if (!pa || !pb) {
+    return a.localeCompare(b)
+  }
+  return (
+    pa.year - pb.year ||
+    pa.letters.length - pb.letters.length ||
+    (pa.letters < pb.letters ? -1 : pa.letters > pb.letters ? 1 : 0)
+  )
+}
+
+function isManifest(value: unknown): value is TzdbManifest {
+  const m = value as Partial<TzdbManifest> | null
+  return (
+    typeof m === 'object' &&
+    m !== null &&
+    typeof m.version === 'string' &&
+    typeof m.dataUrl === 'string' &&
+    typeof m.sha256 === 'string' &&
+    /^[0-9a-f]{64}$/i.test(m.sha256) &&
+    typeof m.signature === 'string'
+  )
+}
+
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
+function toHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer), b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function subtle(): SubtleCrypto | null {
+  const c = (globalThis as { crypto?: Crypto }).crypto
+  return c?.subtle ?? null
+}
+
+/**
+ * Verify a manifest's Ed25519 signature. Fails closed: returns false when
+ * WebCrypto or Ed25519 support is unavailable.
+ */
+export async function verifyManifestSignature(
+  manifest: Pick<TzdbManifest, 'version' | 'sha256' | 'signature'>,
+  publicKey: string = DEFAULT_PUBLIC_KEY
+): Promise<boolean> {
+  const crypto = subtle()
+  if (!crypto) {
+    return false
+  }
+  try {
+    const key = await crypto.importKey(
+      'raw',
+      base64ToBytes(publicKey),
+      { name: 'Ed25519' },
+      false,
+      ['verify']
+    )
+    const message = new TextEncoder().encode(
+      `${manifest.version}\n${manifest.sha256.toLowerCase()}`
+    )
+    return await crypto.verify({ name: 'Ed25519' }, key, base64ToBytes(manifest.signature), message)
+  } catch {
+    return false
+  }
+}
+
+async function readCache(): Promise<CachedTzdbData | null> {
+  try {
+    const raw = await getCacheStorage().get(DATA_CACHE_KEY)
+    if (!raw) {
+      return null
+    }
+    const parsed = JSON.parse(raw) as CachedTzdbData
+    return typeof parsed?.version === 'string' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+async function writeCache(entry: CachedTzdbData): Promise<void> {
+  try {
+    await getCacheStorage().set(DATA_CACHE_KEY, JSON.stringify(entry))
+  } catch {
+    // Cache is best effort
+  }
+}
+
+/**
+ * Ensure fresh timezone database data is available.
  *
- * This function:
- * 1. Checks local cache for existing data
- * 2. Fetches manifest from CDN if needed
- * 3. Downloads new data if version has changed
- * 4. Verifies signature (stub implementation)
- * 5. Updates cache and broadcasts changes
+ * Returns cached data while it is younger than 24 hours, otherwise checks the
+ * manifest, downloads and verifies newer data, and falls back to cached data on
+ * any failure. Never downgrades to an older tzdb version.
  */
 export async function ensureFreshTzdb(
-  manifestURL: string = DEFAULT_MANIFEST_URL
+  manifestURL: string = DEFAULT_MANIFEST_URL,
+  options: EnsureFreshOptions = {}
 ): Promise<{ version: string; data: unknown } | null> {
-  const cache = getCacheStorage()
-  const manifestCacheKey = `${CACHE_KEY_PREFIX}manifest`
-  const dataCacheKey = `${CACHE_KEY_PREFIX}data`
+  const fetchImpl = options.fetch ?? globalThis.fetch
+  const cached = await readCache()
+  const fallback = cached ? { version: cached.version, data: cached.data } : null
+
+  if (cached && Date.now() - cached.cachedAt < TZDB_CACHE_TTL) {
+    return fallback
+  }
 
   try {
-    // Check if we have cached data that's still fresh
-    const cachedDataStr = await cache.get(dataCacheKey)
-    if (cachedDataStr) {
-      const cachedData: CachedTzdbData = JSON.parse(cachedDataStr)
-      const age = Date.now() - cachedData.cachedAt
-
-      if (age < TZDB_CACHE_TTL) {
-        // Data is still fresh, return it
-        return {
-          version: cachedData.version,
-          data: cachedData.data,
-        }
-      }
+    const manifestResponse = await fetchImpl(manifestURL, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-cache',
+    })
+    if (!manifestResponse.ok) {
+      throw new Error(`Manifest request failed: HTTP ${manifestResponse.status}`)
+    }
+    const manifest: unknown = await manifestResponse.json()
+    if (!isManifest(manifest)) {
+      throw new Error('Manifest is malformed')
     }
 
-    // Fetch manifest to check for updates
-    const manifest = await fetchManifest(manifestURL, cache, manifestCacheKey)
-    if (!manifest) {
-      // If we can't fetch manifest but have cached data, use it
-      if (cachedDataStr) {
-        const cachedData: CachedTzdbData = JSON.parse(cachedDataStr)
-        return {
-          version: cachedData.version,
-          data: cachedData.data,
-        }
-      }
-      return null
+    if (cached && compareTzdbVersions(manifest.version, cached.version) <= 0) {
+      await writeCache({ ...cached, cachedAt: Date.now() })
+      return fallback
     }
 
-    // Check if we need to download new data
-    const cachedData = cachedDataStr ? (JSON.parse(cachedDataStr) as CachedTzdbData) : null
-    if (cachedData && cachedData.version === manifest.version) {
-      // Version matches, update cache timestamp and return existing data
-      const updatedCache: CachedTzdbData = {
-        ...cachedData,
-        cachedAt: Date.now(),
-      }
-      await cache.set(dataCacheKey, JSON.stringify(updatedCache), TZDB_CACHE_TTL)
-      return {
-        version: cachedData.version,
-        data: cachedData.data,
-      }
+    if (!(await verifyManifestSignature(manifest, options.publicKey))) {
+      throw new Error(`Manifest signature verification failed for ${manifest.version}`)
     }
 
-    // Download new timezone data
-    const tzdbData = await fetchTzdbData(manifest)
-    if (!tzdbData) {
-      // Download failed, use cached data if available
-      if (cachedData) {
-        return {
-          version: cachedData.version,
-          data: cachedData.data,
-        }
-      }
-      return null
+    const dataUrl = new URL(manifest.dataUrl, manifestURL).toString()
+    const dataResponse = await fetchImpl(dataUrl, { headers: { Accept: 'application/json' } })
+    if (!dataResponse.ok) {
+      throw new Error(`Data request failed: HTTP ${dataResponse.status}`)
+    }
+    const bytes = await dataResponse.arrayBuffer()
+
+    const crypto = subtle()
+    if (!crypto) {
+      throw new Error('WebCrypto is unavailable; cannot verify timezone data')
+    }
+    const digest = toHex(await crypto.digest('SHA-256', bytes))
+    if (digest !== manifest.sha256.toLowerCase()) {
+      throw new Error(`Timezone data hash mismatch for ${manifest.version}`)
     }
 
-    // Verify signature (stub implementation)
-    const isValid = await verifySignature(tzdbData, manifest.signature)
-    if (!isValid) {
-      console.warn('Timezone data signature verification failed, using cached data if available')
-      if (cachedData) {
-        return {
-          version: cachedData.version,
-          data: cachedData.data,
-        }
-      }
-      return null
+    const data: unknown = JSON.parse(new TextDecoder().decode(bytes))
+    if ((data as { version?: unknown })?.version !== manifest.version) {
+      throw new Error('Timezone data version does not match manifest')
     }
 
-    // Cache the new data
-    const newCachedData: CachedTzdbData = {
-      version: manifest.version,
-      cachedAt: Date.now(),
-      etag: manifest.etag ?? undefined,
-      data: tzdbData,
-    }
-    await cache.set(dataCacheKey, JSON.stringify(newCachedData), TZDB_CACHE_TTL)
-
-    // Broadcast update to other tabs/workers
+    await writeCache({ version: manifest.version, cachedAt: Date.now(), data })
     broadcastUpdate(manifest.version)
 
-    return {
-      version: manifest.version,
-      data: tzdbData,
-    }
+    return { version: manifest.version, data }
   } catch (error) {
-    console.warn('Failed to ensure fresh timezone data:', error)
-
-    // Try to return cached data as fallback
-    try {
-      const cachedDataStr = await cache.get(dataCacheKey)
-      if (cachedDataStr) {
-        const cachedData: CachedTzdbData = JSON.parse(cachedDataStr)
-        return {
-          version: cachedData.version,
-          data: cachedData.data,
-        }
-      }
-    } catch {
-      // Ignore cache read errors
-    }
-
-    return null
+    console.warn('Failed to refresh timezone data:', error)
+    return fallback
   }
-}
-
-/**
- * Fetch timezone database manifest
- */
-async function fetchManifest(
-  manifestURL: string,
-  cache: ReturnType<typeof getCacheStorage>,
-  cacheKey: string
-): Promise<TzdbManifest | null> {
-  try {
-    const cachedManifestStr = await cache.get(cacheKey)
-    let etag: string | undefined
-
-    if (cachedManifestStr) {
-      const cachedManifest: TzdbManifest = JSON.parse(cachedManifestStr)
-      etag = cachedManifest.etag
-    }
-
-    // Prepare fetch options with conditional request headers
-    const fetchOptions: RequestInit = {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        'Cache-Control': 'no-cache',
-      },
-    }
-
-    if (etag) {
-      fetchOptions.headers = {
-        ...fetchOptions.headers,
-        'If-None-Match': etag,
-      }
-    }
-
-    const response = await fetch(manifestURL, fetchOptions)
-
-    if (response.status === 304) {
-      // Not modified, return cached manifest
-      return cachedManifestStr ? JSON.parse(cachedManifestStr) : null
-    }
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-
-    const manifest: TzdbManifest = await response.json()
-
-    // Add ETag if available
-    const responseEtag = response.headers.get('etag')
-    if (responseEtag) {
-      manifest.etag = responseEtag
-    }
-
-    // Cache the manifest
-    await cache.set(cacheKey, JSON.stringify(manifest), MANIFEST_CACHE_TTL)
-
-    return manifest
-  } catch (error) {
-    console.warn('Failed to fetch timezone manifest:', error)
-    return null
-  }
-}
-
-/**
- * Fetch timezone database data
- */
-async function fetchTzdbData(manifest: TzdbManifest): Promise<unknown | null> {
-  try {
-    const response = await fetch(manifest.dataUrl, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        'Cache-Control': 'no-cache',
-      },
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-
-    return await response.json()
-  } catch (error) {
-    console.warn('Failed to fetch timezone data:', error)
-    return null
-  }
-}
-
-/**
- * Verify timezone data signature (stub implementation)
- *
- * TODO: Implement proper cryptographic signature verification
- * This should use a public key to verify the data hasn't been tampered with
- */
-async function verifySignature(data: unknown, signature: string): Promise<boolean> {
-  // Stub implementation - always returns true
-  // In a real implementation, this would:
-  // 1. Hash the data using SHA-256 or similar
-  // 2. Verify the signature using a public key (e.g., RSA, ECDSA)
-  // 3. Return true only if signature is valid
-
-  console.debug('Signature verification (stub):', {
-    dataSize: JSON.stringify(data).length,
-    signature: signature.slice(0, 16) + '...',
-  })
-
-  return true
 }
 
 /**
@@ -259,16 +215,15 @@ async function verifySignature(data: unknown, signature: string): Promise<boolea
  */
 function broadcastUpdate(version: string): void {
   const channel = createBroadcastChannel(BROADCAST_CHANNEL_NAME)
-  if (channel) {
-    try {
-      channel.postMessage({
-        type: 'tzdb-update',
-        version,
-        timestamp: Date.now(),
-      })
-    } catch (error) {
-      console.warn('Failed to broadcast timezone update:', error)
-    }
+  if (!channel) {
+    return
+  }
+  try {
+    channel.postMessage({ type: 'tzdb-update', version, timestamp: Date.now() })
+  } catch (error) {
+    console.warn('Failed to broadcast timezone update:', error)
+  } finally {
+    channel.close()
   }
 }
 
@@ -278,24 +233,16 @@ function broadcastUpdate(version: string): void {
 export function onDataUpdate(callback: (version: string) => void): () => void {
   const channel = createBroadcastChannel(BROADCAST_CHANNEL_NAME)
   if (!channel) {
-    // Return no-op cleanup function
     return () => {}
   }
 
-  const handleMessage = (event: { data: unknown }) => {
-    try {
-      const message = event.data as { type: string; version: string; timestamp: number }
-      if (message.type === 'tzdb-update' && typeof message.version === 'string') {
-        callback(message.version)
-      }
-    } catch (error) {
-      console.warn('Failed to handle timezone update message:', error)
+  channel.addEventListener('message', event => {
+    const message = event.data as { type?: unknown; version?: unknown } | null
+    if (message?.type === 'tzdb-update' && typeof message.version === 'string') {
+      callback(message.version)
     }
-  }
+  })
 
-  channel.addEventListener('message', handleMessage)
-
-  // Return cleanup function
   return () => {
     try {
       channel.close()
@@ -309,13 +256,8 @@ export function onDataUpdate(callback: (version: string) => void): () => void {
  * Clear all cached timezone data
  */
 export async function clearCache(): Promise<void> {
-  const cache = getCacheStorage()
-
   try {
-    await Promise.all([
-      cache.delete(`${CACHE_KEY_PREFIX}manifest`),
-      cache.delete(`${CACHE_KEY_PREFIX}data`),
-    ])
+    await getCacheStorage().delete(DATA_CACHE_KEY)
   } catch (error) {
     console.warn('Failed to clear timezone cache:', error)
   }
@@ -325,43 +267,17 @@ export async function clearCache(): Promise<void> {
  * Get cache statistics
  */
 export async function getCacheStats(): Promise<{
-  manifestCached: boolean
   dataCached: boolean
   dataVersion?: string | undefined
   dataAge?: number | undefined
 }> {
-  const cache = getCacheStorage()
-
-  try {
-    const [manifestStr, dataStr] = await Promise.all([
-      cache.get(`${CACHE_KEY_PREFIX}manifest`),
-      cache.get(`${CACHE_KEY_PREFIX}data`),
-    ])
-
-    const stats = {
-      manifestCached: manifestStr != null,
-      dataCached: dataStr != null,
-      dataVersion: undefined as string | undefined,
-      dataAge: undefined as number | undefined,
-    }
-
-    if (dataStr) {
-      const cachedData: CachedTzdbData = JSON.parse(dataStr)
-      stats.dataVersion = cachedData.version
-      stats.dataAge = Date.now() - cachedData.cachedAt
-    }
-
-    return {
-      manifestCached: stats.manifestCached,
-      dataCached: stats.dataCached,
-      dataVersion: stats.dataVersion ?? undefined,
-      dataAge: stats.dataAge ?? undefined,
-    }
-  } catch (error) {
-    console.warn('Failed to get cache stats:', error)
-    return {
-      manifestCached: false,
-      dataCached: false,
-    }
+  const cached = await readCache()
+  if (!cached) {
+    return { dataCached: false }
+  }
+  return {
+    dataCached: true,
+    dataVersion: cached.version,
+    dataAge: Date.now() - cached.cachedAt,
   }
 }
