@@ -222,16 +222,6 @@ before 1900, and rules beyond 2100. Both engines are tested against the same fix
 embedded data is checked against ICU for every zone from 1970 onwards, and the suite runs
 under several host timezones and in Chromium, Firefox and WebKit.
 
-## Migrating from 1.0.0-alpha.1
-
-- Conversions now return correct offsets on hosts not at UTC+0 (alpha.1 subtracted the host offset).
-- Named exports only; there is no default export.
-- The default `disambiguation` is `compatible` (Temporal's default); alpha.1 used `latest`.
-- `formatRelative(date, zone, relativeTo?)` replaces `formatRelative(date, relativeTo, zone)`.
-- `formatTime` and internal helpers (`getCacheStorage`, `detectEnvironment`, ISO helpers) are no longer exported.
-- `ClockworkTime` gains `abbreviation`. `initClockworkTZ` returns a promise.
-- `date-fns` and `date-fns-tz` are no longer dependencies.
-
 ## License
 
 [MIT](./LICENSE) © Adam Turner

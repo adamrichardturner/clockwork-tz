@@ -44,9 +44,16 @@ jobs:
       - run: npm run build
       - run: npm run check:pkg
 
-      # Uses npm trusted publishing (OIDC); configure it for this workflow on npmjs.com
+      # Uses npm trusted publishing (OIDC); configure it for this workflow on npmjs.com.
+      # Skipped when the version is already on npm (e.g. a first release published by hand).
       - name: Publish
-        run: npm publish --provenance --access public --tag ${{ steps.meta.outputs.dist_tag }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "clockwork-tz@$VERSION" version > /dev/null 2>&1; then
+            echo "clockwork-tz@$VERSION is already published; skipping"
+          else
+            npm publish --provenance --access public --tag ${{ steps.meta.outputs.dist_tag }}
+          fi
 
       - name: GitHub release
         env:

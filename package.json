@@ -1,6 +1,6 @@
 {
   "name": "clockwork-tz",
-  "version": "1.0.0-alpha.2",
+  "version": "1.0.0",
   "description": "Timezone conversions that get the weird zones right: exact DST disambiguation, half- and quarter-hour offsets, and an optional deterministic IANA tzdb engine. Zero dependencies.",
   "keywords": [
     "timezone",

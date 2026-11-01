@@ -26,6 +26,30 @@ for z in UTC America/New_York Australia/Lord_Howe Asia/Kathmandu; do TZ=$z npm r
 compiler and network access. The scheduled TZDB Update workflow does this automatically,
 signs the data and opens a pull request.
 
+## First release
+
+npm trusted publishing can only be configured for a package that already exists, so the
+first publish of each package is done by hand from a logged-in maintainer:
+
+1. Publish the data package, then link it to the TZDB Update workflow:
+
+   ```bash
+   (cd packages/clockwork-tz-data && npm publish --access public --provenance=false)
+   npm trust github clockwork-tz-data --repo adamrichardturner/clockwork-tz --file tzdb-update.yml --allow-publish
+   ```
+
+2. Publish the library, then link it to the Release workflow:
+
+   ```bash
+   npm run prepublishOnly && npm publish --access public --provenance=false
+   npm trust github clockwork-tz --repo adamrichardturner/clockwork-tz --file release.yml --allow-publish
+   ```
+
+   Then push the matching `v<version>` tag. The Release workflow sees the version is already
+   on npm, skips publishing, and creates the GitHub release.
+
+After that, every release goes through the tag-driven workflow below.
+
 ## Commits and releases
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/). To release:
