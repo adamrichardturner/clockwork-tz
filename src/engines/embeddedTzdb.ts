@@ -1,177 +1,240 @@
 /**
- * Embedded TZDB engine stub - deterministic timezone calculations using IANA data
- *
- * TODO: This is a stub implementation. Full implementation would include:
- * - Loading and parsing IANA timezone database JSON
- * - Calculating transitions and offsets from raw TZDB data
- * - Handling all edge cases deterministically
- * - Supporting historical timezone changes
+ * Embedded TZDB engine: deterministic results from a specific IANA tzdb
+ * release, independent of the platform's ICU data.
  */
 
-import type {
-  TzEngine,
-  ClockworkTime,
-  Disambiguation,
-  ListOptions,
-  TimeZoneItem,
-} from '../data/types.js'
-import { NotImplementedError } from '../data/types.js'
+import type { LoadableEngine, Transition, ZoneInfo } from '../data/types.js'
+import { TimezoneError } from '../data/types.js'
+import type { CompactZone, TzdbData } from '../tzdb/types.js'
+import { parsePosixTz, posixTransitions, posixZoneInfo, type PosixTz } from '../tzdb/posixTz.js'
+
+interface ZoneRecord {
+  /** Transition instants in epoch ms, ascending */
+  times: number[]
+  /** ZoneInfo in effect from each transition */
+  infos: ZoneInfo[]
+  /** ZoneInfo before the first transition */
+  initial: ZoneInfo
+  /** Rule for instants after the last transition */
+  footer: PosixTz | null
+}
+
+function isCompactZone(value: unknown): value is CompactZone {
+  const zone = value as Partial<CompactZone> | null
+  return (
+    typeof zone === 'object' &&
+    zone !== null &&
+    typeof zone.t === 'string' &&
+    typeof zone.i === 'string' &&
+    Array.isArray(zone.y) &&
+    zone.y.length > 0 &&
+    typeof zone.f === 'string'
+  )
+}
 
 /**
- * Embedded TZDB engine for deterministic timezone calculations
- *
- * This engine provides deterministic results by using a specific version
- * of the IANA timezone database, ensuring consistent behavior across
- * different platforms and over time.
+ * Validate the shape of tzdb data (zone contents are checked lazily on first use)
  */
-export class EmbeddedTzdbEngine implements TzEngine {
+export function isTzdbData(value: unknown): value is TzdbData {
+  const data = value as Partial<TzdbData> | null
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    typeof data.version === 'string' &&
+    typeof data.zones === 'object' &&
+    data.zones !== null &&
+    typeof data.links === 'object' &&
+    data.links !== null &&
+    Array.isArray(data.listed)
+  )
+}
+
+function decodeZone(name: string, zone: unknown): ZoneRecord {
+  if (!isCompactZone(zone)) {
+    throw new TimezoneError(`Malformed timezone data for ${name}`)
+  }
+
+  const types: ZoneInfo[] = zone.y.map(([offsetSeconds, isDST, abbreviation]) => ({
+    offsetSeconds,
+    isDST: isDST === 1,
+    abbreviation,
+  }))
+
+  const times: number[] = []
+  const infos: ZoneInfo[] = []
+  if (zone.t) {
+    let seconds = 0
+    zone.t.split(',').forEach((part, index) => {
+      const value = parseInt(part, 36)
+      seconds = index === 0 ? value : seconds + value
+      const info = types[parseInt(zone.i[index] ?? '', 36)]
+      if (!info || Number.isNaN(value)) {
+        throw new TimezoneError(`Malformed transition data for ${name}`)
+      }
+      times.push(seconds * 1000)
+      infos.push(info)
+    })
+  }
+
+  return { times, infos, initial: types[0]!, footer: parsePosixTz(zone.f) }
+}
+
+function sameInfo(a: ZoneInfo, b: ZoneInfo): boolean {
+  return (
+    a.offsetSeconds === b.offsetSeconds && a.isDST === b.isDST && a.abbreviation === b.abbreviation
+  )
+}
+
+/**
+ * Embedded TZDB engine
+ */
+export class EmbeddedTzdbEngine implements LoadableEngine {
   readonly kind = 'embedded-tzdb' as const
 
-  private tzdbVersion?: string | undefined
-  private tzdbData?: unknown
+  private data: TzdbData | null = null
+  private records = new Map<string, ZoneRecord>()
+  /** Lower-cased identifier to canonical zone name */
+  private lookup = new Map<string, string>()
 
-  constructor(tzdbData?: unknown, version?: string | undefined) {
-    this.tzdbData = tzdbData
-    this.tzdbVersion = version
-  }
-
-  getVersion(): string | undefined {
-    return this.tzdbVersion
-  }
-
-  isValidTimeZone(_zone: string): boolean {
-    // TODO: Implement timezone validation against loaded TZDB data
-    throw new NotImplementedError('EmbeddedTzdbEngine.isValidTimeZone not yet implemented')
-  }
-
-  getUserTimeZone(): string {
-    // TODO: Implement user timezone detection
-    // For now, fallback to system detection or UTC
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone
-    } catch {
-      return 'UTC'
+  constructor(data?: unknown) {
+    if (data !== undefined) {
+      this.loadTzdbData(data)
     }
   }
 
-  fromUTC(_utc: Date, _zone: string): ClockworkTime {
-    // TODO: Implement UTC to timezone conversion using TZDB data
-    // This should:
-    // 1. Find the appropriate timezone rule for the given date
-    // 2. Calculate the local offset including DST
-    // 3. Format the local time string
-    // 4. Determine if DST is active
-    throw new NotImplementedError('EmbeddedTzdbEngine.fromUTC not yet implemented')
+  getVersion(): string | undefined {
+    return this.data?.version
   }
 
-  interpretLocal(_localISO: string, _zone: string, _disambiguation: Disambiguation): ClockworkTime {
-    // TODO: Implement local time interpretation using TZDB data
-    // This should:
-    // 1. Parse the local time
-    // 2. Find potential UTC times (handling ambiguous/invalid cases)
-    // 3. Apply disambiguation strategy
-    // 4. Return the resulting ClockworkTime
-    throw new NotImplementedError('EmbeddedTzdbEngine.interpretLocal not yet implemented')
+  loadTzdbData(data: unknown): void {
+    if (!isTzdbData(data)) {
+      throw new TimezoneError('Invalid timezone data: expected clockwork-tz tzdb JSON')
+    }
+    const lookup = new Map<string, string>()
+    for (const zone of Object.keys(data.zones)) {
+      lookup.set(zone.toLowerCase(), zone)
+    }
+    for (const [alias, target] of Object.entries(data.links)) {
+      if (target in data.zones) {
+        lookup.set(alias.toLowerCase(), target)
+      }
+    }
+    this.data = data
+    this.lookup = lookup
+    this.records = new Map()
   }
 
-  getOffset(_time: Date, _zone: string): number {
-    // TODO: Implement offset calculation from TZDB data
-    // This should return the exact offset in minutes for the given time and zone
-    throw new NotImplementedError('EmbeddedTzdbEngine.getOffset not yet implemented')
-  }
-
-  isDST(_time: Date, _zone: string): boolean {
-    // TODO: Implement DST detection using TZDB rules
-    // This should determine if the given time is during DST in the specified zone
-    throw new NotImplementedError('EmbeddedTzdbEngine.isDST not yet implemented')
-  }
-
-  listTimeZones(_options: ListOptions = {}): TimeZoneItem[] {
-    // TODO: Implement timezone listing from TZDB data
-    // This should return all available timezones with proper labels and current offsets
-    throw new NotImplementedError('EmbeddedTzdbEngine.listTimeZones not yet implemented')
-  }
-
-  format(_time: Date, _zone: string, _pattern: string): string {
-    // TODO: Implement formatting using TZDB data
-    // This should format the time in the specified timezone using the pattern
-    throw new NotImplementedError('EmbeddedTzdbEngine.format not yet implemented')
-  }
-
-  /**
-   * Load timezone database data
-   * TODO: Implement loading from various sources:
-   * - Embedded JSON data
-   * - CDN-fetched data
-   * - Local cache
-   */
-  async loadTzdbData(data: unknown, version: string): Promise<void> {
-    this.tzdbData = data
-    this.tzdbVersion = version
-
-    // TODO: Parse and validate the TZDB data structure
-    // TODO: Build internal indexes for fast lookups
-    throw new NotImplementedError('EmbeddedTzdbEngine.loadTzdbData not yet implemented')
-  }
-
-  /**
-   * Get the raw TZDB data (for debugging/inspection)
-   */
-  getTzdbData(): unknown {
-    return this.tzdbData
-  }
-
-  /**
-   * Check if TZDB data is loaded
-   */
   isDataLoaded(): boolean {
-    return this.tzdbData != null && this.tzdbVersion != null
+    return this.data !== null
+  }
+
+  isValidTimeZone(zone: string): boolean {
+    return typeof zone === 'string' && this.lookup.has(zone.toLowerCase())
+  }
+
+  canonicalize(zone: string): string {
+    const canonical = this.lookup.get(String(zone).toLowerCase())
+    if (!canonical) {
+      throw new TimezoneError(this.data ? `Invalid timezone: ${zone}` : this.noDataMessage())
+    }
+    // Present the identifier users know: keep "UTC" rather than "Etc/UTC"
+    const exact = Object.keys(this.data!.links).find(l => l.toLowerCase() === zone.toLowerCase())
+    if (exact && this.data!.listed.includes(exact)) {
+      return exact
+    }
+    return canonical
+  }
+
+  listZoneIds(): string[] {
+    return this.data ? [...this.data.listed] : []
+  }
+
+  getZoneInfo(epochMs: number, zone: string): ZoneInfo {
+    const record = this.record(zone)
+    const { times, infos } = record
+
+    if (times.length === 0 || epochMs < times[0]!) {
+      if (times.length === 0 && record.footer) {
+        return posixZoneInfo(record.footer, epochMs)
+      }
+      return record.initial
+    }
+
+    const last = times.length - 1
+    if (epochMs >= times[last]! && record.footer) {
+      return posixZoneInfo(record.footer, epochMs)
+    }
+
+    // Last transition at or before epochMs
+    let lo = 0
+    let hi = last
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (times[mid]! <= epochMs) {
+        lo = mid
+      } else {
+        hi = mid - 1
+      }
+    }
+    return infos[lo]!
+  }
+
+  getTransitions(zone: string, fromMs: number, toMs: number): Transition[] {
+    const record = this.record(zone)
+    const result: Transition[] = []
+    let before = this.getZoneInfo(fromMs - 1, zone)
+
+    const push = (at: number, after: ZoneInfo) => {
+      if (at >= fromMs && at < toMs && !sameInfo(before, after)) {
+        result.push({ at, before, after })
+      }
+      if (at >= fromMs && at < toMs) {
+        before = after
+      }
+    }
+
+    record.times.forEach((at, index) => push(at, record.infos[index]!))
+
+    const lastTable = record.times[record.times.length - 1] ?? -Infinity
+    if (record.footer && toMs > lastTable) {
+      const fromYear = new Date(
+        Math.max(fromMs, lastTable === -Infinity ? fromMs : lastTable)
+      ).getUTCFullYear()
+      const toYear = new Date(toMs).getUTCFullYear() + 1
+      for (const transition of posixTransitions(record.footer, fromYear - 1, toYear)) {
+        if (transition.at > lastTable) {
+          push(transition.at, transition.info)
+        }
+      }
+    }
+
+    return result
+  }
+
+  private noDataMessage(): string {
+    return 'No timezone data loaded: pass `data` (e.g. from "clockwork-tz/tzdb") or a manifestURL to initClockworkTZ'
+  }
+
+  private record(zone: string): ZoneRecord {
+    if (!this.data) {
+      throw new TimezoneError(this.noDataMessage())
+    }
+    const canonical = this.lookup.get(String(zone).toLowerCase())
+    if (!canonical) {
+      throw new TimezoneError(`Invalid timezone: ${zone}`)
+    }
+    let record = this.records.get(canonical)
+    if (!record) {
+      record = decodeZone(canonical, this.data.zones[canonical])
+      this.records.set(canonical, record)
+    }
+    return record
   }
 }
 
 /**
- * Create and return a new EmbeddedTzdb engine instance
+ * Create a new embedded TZDB engine, optionally with data already loaded
  */
-export function createEmbeddedTzdbEngine(tzdbData?: unknown, version?: string): EmbeddedTzdbEngine {
-  return new EmbeddedTzdbEngine(tzdbData, version)
-}
-
-/**
- * Expected structure for TZDB JSON data (for future implementation)
- *
- * TODO: Define the exact structure based on IANA TZDB format
- */
-export interface TzdbJsonData {
-  version: string
-  zones: Record<string, TzdbZoneData>
-  rules: Record<string, TzdbRuleData[]>
-  links: Record<string, string>
-}
-
-export interface TzdbZoneData {
-  name: string
-  rules: TzdbZoneRule[]
-}
-
-export interface TzdbZoneRule {
-  from: number // Year
-  to: number // Year (or Infinity)
-  type: string // Rule name or offset
-  in: number // Month
-  on: string // Day specification
-  at: string // Time specification
-  save: string // DST save amount
-  letters: string // Abbreviation letters
-}
-
-export interface TzdbRuleData {
-  name: string
-  from: number
-  to: number
-  type: string
-  in: number
-  on: string
-  at: string
-  save: string
-  letters: string
+export function createEmbeddedTzdbEngine(data?: unknown): EmbeddedTzdbEngine {
+  return new EmbeddedTzdbEngine(data)
 }

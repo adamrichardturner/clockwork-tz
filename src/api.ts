@@ -10,93 +10,138 @@ import type {
   ClockworkOptions,
   FormatOptions,
   ConvertOptions,
+  DateInput,
+  LoadableEngine,
   TzEngine,
+  ZoneInfo,
 } from './data/types.js'
 import { TimezoneError } from './data/types.js'
 
 import { createSystemIntlEngine } from './engines/systemIntl.js'
 import { createEmbeddedTzdbEngine } from './engines/embeddedTzdb.js'
-import { ensureFreshTzdb, onDataUpdate as onDataUpdateImpl } from './data/updater.js'
+import { ensureFreshTzdb, onDataUpdate as onBroadcastUpdate } from './data/updater.js'
 import {
   watchZoneTransitions as watchZoneTransitionsImpl,
   onTick as onTickImpl,
 } from './transitions.js'
-import { format as formatImpl, DEFAULT_FORMAT_PATTERN } from './format.js'
-import { normalizeToDate } from './utils/iso.js'
+import { formatInstant, LOCAL_TIME_PATTERN } from './format.js'
+import { getEngine, setEngineState } from './core/state.js'
+import {
+  assertValidZone,
+  canonicalizeZone,
+  isValidZone,
+  offsetSecondsToString,
+  zoneInfoAt,
+} from './core/zone.js'
+import { wallMsToInstant } from './core/localTime.js'
+import {
+  componentsToWallMs,
+  isValidISOString,
+  normalizeToDate,
+  parseLocalISOString,
+} from './utils/iso.js'
 
 /**
  * Global state
  */
-let currentEngine: TzEngine = createSystemIntlEngine()
 let initOptions: ClockworkOptions = {}
-let updateListeners: Set<(version: string) => void> = new Set()
+const updateListeners = new Set<(version: string) => void>()
+let updateTimer: ReturnType<typeof setInterval> | null = null
+let lastUpdate: Date | undefined
+
+function isLoadable(engine: TzEngine): engine is LoadableEngine {
+  return typeof (engine as Partial<LoadableEngine>).loadTzdbData === 'function'
+}
+
+function notifyListeners(version: string): void {
+  for (const listener of updateListeners) {
+    try {
+      listener(version)
+    } catch (error) {
+      console.warn('Error in data update listener:', error)
+    }
+  }
+}
+
+async function loadFromManifest(manifestURL: string, publicKey?: string): Promise<boolean> {
+  const result = await ensureFreshTzdb(manifestURL, publicKey === undefined ? {} : { publicKey })
+  const engine = getEngine()
+  if (!result || !isLoadable(engine)) {
+    return false
+  }
+  if (result.version === engine.getVersion()) {
+    return false
+  }
+  engine.loadTzdbData(result.data)
+  lastUpdate = new Date()
+  notifyListeners(result.version)
+  return true
+}
 
 /**
- * Initialize clockwork-tz with options
+ * Initialize clockwork-tz with options. Calling it again replaces the engine
+ * and any auto-update schedule. The returned promise settles once the initial
+ * manifest load (if any) has been attempted; it never rejects.
  */
-export function initClockworkTZ(opts: ClockworkOptions = {}): void {
+export function initClockworkTZ(opts: ClockworkOptions = {}): Promise<void> {
+  dispose()
   initOptions = { ...opts }
 
-  const { engine = 'system-intl', manifestURL, autoUpdateIntervalMs = 24 * 60 * 60 * 1000 } = opts
+  const {
+    engine = 'system-intl',
+    data,
+    manifestURL,
+    publicKey,
+    autoUpdateIntervalMs = 24 * 60 * 60 * 1000,
+  } = opts
 
-  // Switch engine if requested
-  if (engine !== currentEngine.kind) {
-    switch (engine) {
-      case 'system-intl': {
-        currentEngine = createSystemIntlEngine()
-        break
+  switch (engine) {
+    case 'system-intl': {
+      setEngineState(createSystemIntlEngine())
+      return Promise.resolve()
+    }
+    case 'embedded-tzdb': {
+      const embedded = createEmbeddedTzdbEngine()
+      if (data !== undefined) {
+        embedded.loadTzdbData(data)
+        lastUpdate = new Date()
       }
-      case 'embedded-tzdb': {
-        currentEngine = createEmbeddedTzdbEngine()
-
-        // Auto-load timezone data if manifest URL provided
-        if (manifestURL) {
-          ensureFreshTzdb(manifestURL)
-            .then(result => {
-              if (result && 'loadTzdbData' in currentEngine) {
-                return (currentEngine as any).loadTzdbData(result.data, result.version)
-              }
-            })
-            .catch(error => {
-              console.warn('Failed to load initial timezone data:', error)
-            })
-        }
-        break
-      }
-      default: {
-        throw new Error(`Unknown engine: ${engine}`)
-      }
+      setEngineState(embedded)
+      break
+    }
+    default: {
+      throw new TimezoneError(`Unknown engine: ${String(engine)}`)
     }
   }
 
-  // Set up auto-update if enabled and using embedded engine
-  if (engine === 'embedded-tzdb' && manifestURL && autoUpdateIntervalMs > 0) {
-    const updateInterval = setInterval(async () => {
-      try {
-        const result = await ensureFreshTzdb(manifestURL)
-        if (result && 'loadTzdbData' in currentEngine) {
-          await (currentEngine as any).loadTzdbData(result.data, result.version)
+  if (!manifestURL) {
+    return Promise.resolve()
+  }
 
-          // Notify listeners
-          for (const listener of updateListeners) {
-            try {
-              listener(result.version)
-            } catch (error) {
-              console.warn('Error in data update listener:', error)
-            }
-          }
-        }
-      } catch (error) {
+  if (autoUpdateIntervalMs > 0) {
+    updateTimer = setInterval(() => {
+      loadFromManifest(manifestURL, publicKey).catch(error => {
         console.warn('Auto-update failed:', error)
-      }
-    }, autoUpdateIntervalMs)
-
-    // Clean up on page unload if in browser
-    if (typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', () => {
-        clearInterval(updateInterval)
       })
+    }, autoUpdateIntervalMs)
+    ;(updateTimer as { unref?: () => void }).unref?.()
+  }
+
+  return loadFromManifest(manifestURL, publicKey).then(
+    () => undefined,
+    error => {
+      console.warn('Failed to load initial timezone data:', error)
     }
+  )
+}
+
+/**
+ * Stop auto-updates started by initClockworkTZ
+ */
+export function dispose(): void {
+  if (updateTimer) {
+    clearInterval(updateTimer)
+    updateTimer = null
   }
 }
 
@@ -104,175 +149,210 @@ export function initClockworkTZ(opts: ClockworkOptions = {}): void {
  * Get the current engine type
  */
 export function engine(): EngineKind {
-  return currentEngine.kind
+  return getEngine().kind
 }
 
 /**
  * Get the current TZDB version (if available)
  */
 export function tzdbVersion(): string | undefined {
-  return currentEngine.getVersion()
+  return getEngine().getVersion()
 }
 
 /**
  * Get the user's timezone
  */
 export function getUserTimeZone(): string {
-  return currentEngine.getUserTimeZone()
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
 }
 
 /**
- * Check if a timezone identifier is valid
+ * Check if a timezone identifier (or fixed offset like "+05:30") is valid
  */
 export function isValidTimeZone(zone: string): boolean {
-  if (typeof zone !== 'string' || zone.trim() === '') {
-    return false
-  }
-
-  return currentEngine.isValidTimeZone(zone)
+  return isValidZone(zone, getEngine())
 }
 
 /**
- * Convert UTC time to a specific timezone
+ * Canonical spelling of a timezone: links such as "Asia/Calcutta" resolve to
+ * their primary zone where the engine knows them.
  */
-export function fromUTC(
-  input: string | Date,
+export function canonicalizeTimeZone(zone: string): string {
+  return canonicalizeZone(zone, getEngine())
+}
+
+function buildTime(
+  epochMs: number,
   zone: string,
-  opts: FormatOptions = {}
+  engine: TzEngine,
+  opts: FormatOptions
 ): ClockworkTime {
-  if (!isValidTimeZone(zone)) {
-    throw new TimezoneError(`Invalid timezone: ${zone}`)
+  const info = zoneInfoAt(epochMs, zone, engine)
+  const result: ClockworkTime = {
+    utc: new Date(epochMs).toISOString(),
+    zone,
+    local: formatInstant(epochMs, zone, opts.format ?? LOCAL_TIME_PATTERN, engine, opts.locale),
+    offsetMinutes: info.offsetSeconds / 60,
+    isDST: info.isDST,
+    abbreviation: info.abbreviation,
+    source: engine.kind,
   }
-
-  const date = normalizeToDate(input)
-  const result = currentEngine.fromUTC(date, zone)
-
-  // Apply custom formatting if requested
-  if (opts.format && opts.format !== DEFAULT_FORMAT_PATTERN) {
-    result.local = currentEngine.format(date, zone, opts.format)
+  const version = engine.getVersion()
+  if (version !== undefined) {
+    result.tzdbVersion = version
   }
-
   return result
 }
 
 /**
- * Interpret a local time string in a specific timezone
+ * Convert an instant to a specific timezone
+ */
+export function fromUTC(input: DateInput, zone: string, opts: FormatOptions = {}): ClockworkTime {
+  const engine = getEngine()
+  assertValidZone(zone, engine)
+  return buildTime(normalizeToDate(input).getTime(), zone, engine, opts)
+}
+
+/**
+ * Interpret a wall-clock time (no offset, e.g. "2024-03-10T02:30:00") in a zone
  */
 export function interpretLocal(
   localISO: string,
   zone: string,
   opts: ConvertOptions = {}
 ): ClockworkTime {
-  if (!isValidTimeZone(zone)) {
-    throw new TimezoneError(`Invalid timezone: ${zone}`)
+  const engine = getEngine()
+  assertValidZone(zone, engine)
+
+  let wallMs: number
+  try {
+    wallMs = componentsToWallMs(parseLocalISOString(localISO))
+  } catch (error) {
+    throw new TimezoneError(`Invalid local time "${localISO}"`, { cause: error })
   }
 
-  const { disambiguation = 'latest', format } = opts
-  const result = currentEngine.interpretLocal(localISO, zone, disambiguation)
-
-  // Apply custom formatting if requested
-  if (format && format !== DEFAULT_FORMAT_PATTERN) {
-    const utcDate = new Date(result.utc)
-    result.local = currentEngine.format(utcDate, zone, format)
-  }
-
-  return result
+  const epochMs = wallMsToInstant(
+    wallMs,
+    zone,
+    engine,
+    opts.disambiguation ?? 'compatible',
+    localISO
+  )
+  return buildTime(epochMs, zone, engine, opts)
 }
 
 /**
- * Convert time from one timezone to another
+ * Convert time from one timezone to another. Strings without an offset are
+ * read as wall time in `fromZone`; instants (Date, epoch ms, strings with an
+ * offset) are converted directly.
  */
 export function convert(
-  input: string | Date,
+  input: DateInput,
   fromZone: string,
   toZone: string,
   opts: ConvertOptions = {}
 ): ClockworkTime {
-  if (!isValidTimeZone(fromZone)) {
-    throw new TimezoneError(`Invalid source timezone: ${fromZone}`)
+  const engine = getEngine()
+  assertValidZone(fromZone, engine, 'source timezone')
+  assertValidZone(toZone, engine, 'target timezone')
+
+  if (typeof input === 'string' && !isValidISOString(input)) {
+    const { format: _format, ...interpretOpts } = opts
+    const source = interpretLocal(input, fromZone, interpretOpts)
+    return fromUTC(source.utc, toZone, opts)
   }
 
-  if (!isValidTimeZone(toZone)) {
-    throw new TimezoneError(`Invalid target timezone: ${toZone}`)
-  }
-
-  // First, interpret the input in the source timezone
-  let utcTime: Date
-
-  if (input instanceof Date) {
-    utcTime = input
-  } else if (typeof input === 'string') {
-    // Check if it's already a UTC string
-    if (input.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(input)) {
-      utcTime = normalizeToDate(input)
-    } else {
-      // Treat as local time in the source timezone
-      const sourceResult = interpretLocal(input, fromZone, opts)
-      utcTime = new Date(sourceResult.utc)
-    }
-  } else {
-    throw new Error('Input must be a Date object or ISO string')
-  }
-
-  // Convert to target timezone
-  return fromUTC(utcTime, toZone, opts)
+  return fromUTC(input, toZone, opts)
 }
 
 /**
- * Format a date/time in a specific timezone
+ * Offset, DST flag and abbreviation in effect at an instant
  */
-export function format(
-  input: string | Date,
-  zone: string,
-  pattern: string = DEFAULT_FORMAT_PATTERN
-): string {
-  if (!isValidTimeZone(zone)) {
-    throw new TimezoneError(`Invalid timezone: ${zone}`)
-  }
-
-  const date = normalizeToDate(input)
-  return formatImpl(date, zone, pattern)
+export function getZoneInfo(input: DateInput, zone: string): ZoneInfo {
+  const engine = getEngine()
+  assertValidZone(zone, engine)
+  return zoneInfoAt(normalizeToDate(input).getTime(), zone, engine)
 }
 
 /**
- * Get timezone offset in minutes for a specific date/time
+ * Get timezone offset in minutes at an instant
  */
-export function getOffset(input: string | Date, zone: string): number {
-  if (!isValidTimeZone(zone)) {
-    throw new TimezoneError(`Invalid timezone: ${zone}`)
-  }
-
-  const date = normalizeToDate(input)
-  return currentEngine.getOffset(date, zone)
+export function getOffset(input: DateInput, zone: string): number {
+  return getZoneInfo(input, zone).offsetSeconds / 60
 }
 
 /**
- * Check if a date/time is in Daylight Saving Time
+ * Check if an instant is in Daylight Saving Time. Returns false for invalid zones.
  */
-export function isDST(input: string | Date, zone: string): boolean {
+export function isDST(input: DateInput, zone: string): boolean {
   if (!isValidTimeZone(zone)) {
     return false
   }
+  return getZoneInfo(input, zone).isDST
+}
 
-  const date = normalizeToDate(input)
-  return currentEngine.isDST(date, zone)
+function zoneLabel(
+  zone: string,
+  epochMs: number,
+  info: ZoneInfo,
+  style: string,
+  locale: string
+): string {
+  switch (style) {
+    case 'offset': {
+      return `(UTC${offsetSecondsToString(info.offsetSeconds)}) ${zone}`
+    }
+    case 'abbrev': {
+      return `${zone} (${info.abbreviation})`
+    }
+    case 'altName': {
+      try {
+        const name = new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: 'long' })
+          .formatToParts(epochMs)
+          .find(p => p.type === 'timeZoneName')?.value
+        return name && name !== zone ? `${zone} (${name})` : zone
+      } catch {
+        return zone
+      }
+    }
+    default: {
+      return zone
+    }
+  }
 }
 
 /**
- * List available timezones with labels and current offsets
+ * List available timezones with labels and offsets, sorted by offset then name
  */
 export function listTimeZones(opts: ListOptions = {}): TimeZoneItem[] {
-  return currentEngine.listTimeZones(opts)
+  const engine = getEngine()
+  const { labelStyle = 'original', locale = 'en' } = opts
+  const epochMs = normalizeToDate(opts.at ?? new Date()).getTime()
+
+  return engine
+    .listZoneIds()
+    .map(zone => {
+      const info = engine.getZoneInfo(epochMs, zone)
+      return {
+        value: zone,
+        label: zoneLabel(zone, epochMs, info, labelStyle, locale),
+        offsetMinutes: info.offsetSeconds / 60,
+      }
+    })
+    .sort((a, b) => a.offsetMinutes - b.offsetMinutes || a.value.localeCompare(b.value))
 }
 
 /**
- * Listen for timezone data updates
+ * Listen for timezone data updates (in this context and, via
+ * BroadcastChannel, in other tabs and workers)
  */
 export function onDataUpdate(callback: (version: string) => void): () => void {
   updateListeners.add(callback)
-
-  // Also listen for broadcast updates from other tabs
-  const broadcastCleanup = onDataUpdateImpl(callback)
+  const broadcastCleanup = onBroadcastUpdate(callback)
 
   return () => {
     updateListeners.delete(callback)
@@ -281,10 +361,10 @@ export function onDataUpdate(callback: (version: string) => void): () => void {
 }
 
 /**
- * Watch for timezone transitions (DST changes)
+ * Watch for timezone transitions (DST changes) in a zone
  */
 export function watchZoneTransitions(zone: string, callback: (at: Date) => void): () => void {
-  return watchZoneTransitionsImpl(zone, callback, currentEngine)
+  return watchZoneTransitionsImpl(zone, callback, getEngine())
 }
 
 /**
@@ -298,14 +378,14 @@ export function onTick(callback: (now: Date) => void, granularityMs: number = 10
  * Get current engine instance (for advanced usage)
  */
 export function getCurrentEngine(): TzEngine {
-  return currentEngine
+  return getEngine()
 }
 
 /**
  * Manually set the engine (for testing or advanced usage)
  */
 export function setEngine(engine: TzEngine): void {
-  currentEngine = engine
+  setEngineState(engine)
 }
 
 /**
@@ -316,35 +396,24 @@ export function getInitOptions(): ClockworkOptions {
 }
 
 /**
- * Force refresh timezone data (for embedded engine)
+ * Force a refresh of timezone data from the configured manifest. Resolves
+ * true when new data was loaded.
  */
-export async function refreshTimezoneData(): Promise<void> {
-  if (currentEngine.kind !== 'embedded-tzdb') {
-    throw new Error('Timezone data refresh only available for embedded-tzdb engine')
+export async function refreshTimezoneData(): Promise<boolean> {
+  if (getEngine().kind !== 'embedded-tzdb') {
+    throw new TimezoneError('Timezone data refresh only available for embedded-tzdb engine')
   }
 
-  const { manifestURL } = initOptions
+  const { manifestURL, publicKey } = initOptions
   if (!manifestURL) {
-    throw new Error('No manifest URL configured for timezone data refresh')
+    throw new TimezoneError('No manifest URL configured for timezone data refresh')
   }
 
-  const result = await ensureFreshTzdb(manifestURL)
-  if (result && 'loadTzdbData' in currentEngine) {
-    await (currentEngine as any).loadTzdbData(result.data, result.version)
-
-    // Notify listeners
-    for (const listener of updateListeners) {
-      try {
-        listener(result.version)
-      } catch (error) {
-        console.warn('Error in data update listener:', error)
-      }
-    }
-  }
+  return loadFromManifest(manifestURL, publicKey)
 }
 
 /**
- * Get library version and status information
+ * Get library status information
  */
 export function getStatus(): {
   engine: EngineKind
@@ -352,16 +421,11 @@ export function getStatus(): {
   dataLoaded: boolean
   lastUpdate?: Date | undefined
 } {
-  const isDataLoaded =
-    currentEngine.kind === 'system-intl' ||
-    (currentEngine.kind === 'embedded-tzdb' &&
-      'isDataLoaded' in currentEngine &&
-      (currentEngine as any).isDataLoaded())
-
+  const current = getEngine()
   return {
-    engine: currentEngine.kind,
-    tzdbVersion: currentEngine.getVersion() ?? undefined,
-    dataLoaded: isDataLoaded,
-    lastUpdate: undefined, // TODO: Track last update timestamp
+    engine: current.kind,
+    tzdbVersion: current.getVersion(),
+    dataLoaded: isLoadable(current) ? current.isDataLoaded() : true,
+    lastUpdate,
   }
 }

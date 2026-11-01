@@ -1,41 +1,7 @@
 {
   "name": "clockwork-tz",
-  "version": "1.0.0-alpha.1",
-  "description": "Accurate timezone conversions and DST handling with optional deterministic IANA tzdb support",
-  "type": "module",
-  "sideEffects": false,
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    },
-    "./browser": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.browser.js"
-    }
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "prepare": "husky install",
-    "prepublishOnly": "npm run typecheck && npm run build && npm run test:run"
-  },
+  "version": "1.0.0",
+  "description": "Timezone conversions that get the weird zones right: exact DST disambiguation, half- and quarter-hour offsets, and an optional deterministic IANA tzdb engine. Zero dependencies.",
   "keywords": [
     "timezone",
     "tz",
@@ -48,35 +14,90 @@
     "time",
     "intl",
     "conversion",
-    "offset"
+    "offset",
+    "temporal",
+    "disambiguation",
+    "zero-dependency",
+    "tzif"
   ],
-  "author": "Adam Turner",
-  "license": "MIT",
+  "homepage": "https://github.com/adamrichardturner/clockwork-tz#readme",
+  "bugs": {
+    "url": "https://github.com/adamrichardturner/clockwork-tz/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/adamrichardturner/clockwork-tz.git"
   },
-  "bugs": {
-    "url": "https://github.com/adamrichardturner/clockwork-tz/issues"
+  "license": "MIT",
+  "author": "Adam Turner <hello@adamrichardturner.dev>",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./tzdb": {
+      "import": {
+        "types": "./dist/tzdb.d.ts",
+        "default": "./dist/tzdb.js"
+      },
+      "require": {
+        "types": "./dist/tzdb.d.cts",
+        "default": "./dist/tzdb.cjs"
+      }
+    },
+    "./package.json": "./package.json"
   },
-  "homepage": "https://github.com/adamrichardturner/clockwork-tz#readme",
-  "dependencies": {
-    "date-fns": "^3.6.0",
-    "date-fns-tz": "^3.1.3"
-  },
-  "devDependencies": {
-    "@types/node": "^20.14.0",
-    "@typescript-eslint/eslint-plugin": "^7.13.0",
-    "@typescript-eslint/parser": "^7.13.0",
-    "eslint": "^8.57.0",
-    "eslint-config-prettier": "^9.1.0",
-    "husky": "^9.0.11",
-    "prettier": "^3.3.2",
-    "tsup": "^8.1.0",
-    "typescript": "^5.4.5",
-    "vitest": "^1.6.0"
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "test": "vitest --project node",
+    "test:run": "vitest run --project node",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.tools.json",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test:run && npm run check:pkg",
+    "check:pkg": "publint && attw --pack . --profile node16",
+    "build:tzdb": "node scripts/build-tzdb.ts",
+    "test:browser": "vitest run --project browser",
+    "test:coverage": "vitest run --project node --coverage"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@types/node": "^26.6.6",
+    "@vitest/browser-playwright": "^5.0.5",
+    "@vitest/coverage-v8": "^5.0.5",
+    "oxlint": "^1.90.0",
+    "playwright": "^1.64.1",
+    "prettier": "^3.9.10",
+    "publint": "^0.3.25",
+    "tsdown": "^0.23.4",
+    "typescript": "~7.0.2",
+    "vitest": "^5.0.5"
   }
 }

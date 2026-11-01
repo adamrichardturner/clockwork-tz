@@ -174,12 +174,14 @@ const stopTicking = onTick(now => {
       }
 
       console.log('\nAll examples completed successfully!')
-      console.log('\nFor more information, visit: https://github.com/adamturner/clockwork-tz')
+      console.log(
+        '\nFor more information, visit: https://github.com/adamrichardturner/clockwork-tz'
+      )
     }, 1000)
   }
 }, 1000)
 
-// Utility function to format offset
+// Local helper (the library also exports formatOffset)
 function formatOffset(offsetMinutes) {
   const sign = offsetMinutes >= 0 ? '+' : '-'
   const absMinutes = Math.abs(offsetMinutes)

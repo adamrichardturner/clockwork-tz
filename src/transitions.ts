@@ -2,7 +2,34 @@
  * Timezone transition detection and watching
  */
 
-import type { TzEngine } from './data/types.js'
+import type { DateInput, Transition, TzEngine, ZoneInfo } from './data/types.js'
+import { getEngine } from './core/state.js'
+import { isFixedOffsetZone, isValidZone, zoneInfoAt } from './core/zone.js'
+import { normalizeToDate } from './utils/iso.js'
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const MAX_TIMEOUT_MS = 2 ** 31 - 1
+const DEFAULT_SEARCH_DAYS = 2 * 366
+
+/**
+ * Public description of a transition
+ */
+export interface TransitionInfo {
+  /** Instant of the transition */
+  date: Date
+  /** Offset before the transition, in minutes */
+  fromOffset: number
+  /** Offset from the transition onwards, in minutes */
+  toOffset: number
+  /** Whether DST starts at this transition */
+  isDSTStart: boolean
+  /** Whether DST ends at this transition */
+  isDSTEnd: boolean
+  /** Abbreviation before the transition */
+  fromAbbreviation: string
+  /** Abbreviation from the transition onwards */
+  toAbbreviation: string
+}
 
 /**
  * Active watchers for cleanup
@@ -15,66 +42,225 @@ const activeWatchers = new Set<() => void>()
 const activeTickWatchers = new Set<{
   callback: (now: Date) => void
   interval: number
-  timeoutId: ReturnType<typeof setTimeout>
+  timeoutId: ReturnType<typeof setInterval>
 }>()
 
+function sameInfo(a: ZoneInfo, b: ZoneInfo): boolean {
+  return (
+    a.offsetSeconds === b.offsetSeconds && a.isDST === b.isDST && a.abbreviation === b.abbreviation
+  )
+}
+
 /**
- * Watch for timezone transitions in a specific zone
- *
- * This function detects when a timezone transitions (DST changes)
- * and calls the callback at the exact moment of transition.
+ * Binary search for the first second in (lo, hi] whose info differs from `before`
+ */
+function bisect(
+  lo: number,
+  hi: number,
+  zone: string,
+  engine: TzEngine,
+  before: ZoneInfo
+): Transition {
+  lo = Math.floor(lo / 1000) * 1000
+  hi = Math.ceil(hi / 1000) * 1000
+  while (hi - lo > 1000) {
+    const mid = lo + Math.floor((hi - lo) / 2000) * 1000
+    if (sameInfo(zoneInfoAt(mid, zone, engine), before)) {
+      lo = mid
+    } else {
+      hi = mid
+    }
+  }
+  return { at: hi, before, after: zoneInfoAt(hi, zone, engine) }
+}
+
+/**
+ * All transitions in [fromMs, toMs). Exact when the engine knows its
+ * transitions; otherwise found by daily sampling and bisection to the second.
+ */
+export function findTransitions(
+  zone: string,
+  fromMs: number,
+  toMs: number,
+  engine: TzEngine = getEngine()
+): Transition[] {
+  if (isFixedOffsetZone(zone) || toMs <= fromMs) {
+    return []
+  }
+  if (engine.getTransitions) {
+    return engine.getTransitions(zone, fromMs, toMs)
+  }
+
+  const transitions: Transition[] = []
+  let prevMs = fromMs
+  let prevInfo = zoneInfoAt(prevMs, zone, engine)
+  while (prevMs < toMs) {
+    const nextMs = Math.min(prevMs + DAY_MS, toMs)
+    const nextInfo = zoneInfoAt(nextMs, zone, engine)
+    if (!sameInfo(prevInfo, nextInfo)) {
+      // There may be more than one change in the window; walk them in order
+      let cursor = prevMs
+      let cursorInfo = prevInfo
+      while (!sameInfo(cursorInfo, nextInfo)) {
+        const transition = bisect(cursor, nextMs, zone, engine, cursorInfo)
+        if (transition.at > fromMs && transition.at < toMs) {
+          transitions.push(transition)
+        }
+        cursor = transition.at
+        cursorInfo = transition.after
+      }
+    }
+    prevMs = nextMs
+    prevInfo = nextInfo
+  }
+  return transitions
+}
+
+function toInfo(transition: Transition): TransitionInfo {
+  return {
+    date: new Date(transition.at),
+    fromOffset: transition.before.offsetSeconds / 60,
+    toOffset: transition.after.offsetSeconds / 60,
+    isDSTStart: !transition.before.isDST && transition.after.isDST,
+    isDSTEnd: transition.before.isDST && !transition.after.isDST,
+    fromAbbreviation: transition.before.abbreviation,
+    toAbbreviation: transition.after.abbreviation,
+  }
+}
+
+function nextTransition(zone: string, fromMs: number, engine: TzEngine, days: number) {
+  return findTransitions(zone, fromMs + 1, fromMs + days * DAY_MS, engine).find(t => t.at > fromMs)
+}
+
+/**
+ * Get information about the next timezone transition after `from`
+ */
+export function getNextTransition(
+  zone: string,
+  from: DateInput = new Date(),
+  engine: TzEngine = getEngine(),
+  searchDays = DEFAULT_SEARCH_DAYS
+): TransitionInfo | null {
+  if (!isValidZone(zone, engine)) {
+    return null
+  }
+  const fromMs = normalizeToDate(from).getTime()
+  const transition = nextTransition(zone, fromMs, engine, searchDays)
+  return transition ? toInfo(transition) : null
+}
+
+/**
+ * Get information about the most recent transition at or before `from`
+ */
+export function getPreviousTransition(
+  zone: string,
+  from: DateInput = new Date(),
+  engine: TzEngine = getEngine(),
+  searchDays = DEFAULT_SEARCH_DAYS
+): TransitionInfo | null {
+  if (!isValidZone(zone, engine)) {
+    return null
+  }
+  const fromMs = normalizeToDate(from).getTime()
+  const transitions = findTransitions(zone, fromMs - searchDays * DAY_MS, fromMs + 1, engine)
+  const last = transitions[transitions.length - 1]
+  return last ? toInfo(last) : null
+}
+
+/**
+ * List every transition between two instants
+ */
+export function getTransitions(
+  zone: string,
+  from: DateInput,
+  to: DateInput,
+  engine: TzEngine = getEngine()
+): TransitionInfo[] {
+  if (!isValidZone(zone, engine)) {
+    return []
+  }
+  return findTransitions(
+    zone,
+    normalizeToDate(from).getTime(),
+    normalizeToDate(to).getTime(),
+    engine
+  ).map(toInfo)
+}
+
+/**
+ * Check if a date is within `windowHours` of a timezone transition
+ */
+export function isNearTransition(
+  date: DateInput,
+  zone: string,
+  engine: TzEngine = getEngine(),
+  windowHours: number = 24
+): boolean {
+  if (!isValidZone(zone, engine)) {
+    return false
+  }
+  const ms = normalizeToDate(date).getTime()
+  const windowMs = windowHours * 60 * 60 * 1000
+  return findTransitions(zone, ms - windowMs, ms + windowMs, engine).length > 0
+}
+
+/**
+ * Watch for timezone transitions in a specific zone and call `callback` just
+ * after each one happens.
  */
 export function watchZoneTransitions(
   zone: string,
   callback: (at: Date) => void,
-  engine?: TzEngine
+  engine: TzEngine = getEngine()
 ): () => void {
-  if (!engine) {
-    console.warn('No engine provided to watchZoneTransitions, cannot detect transitions')
-    return () => {}
-  }
-
-  if (!engine.isValidTimeZone(zone)) {
+  if (!isValidZone(zone, engine)) {
     console.warn(`Invalid timezone "${zone}" for transition watching`)
     return () => {}
   }
 
   let isActive = true
-  let currentTimeoutId: ReturnType<typeof setTimeout> | null = null
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
 
-  const scheduleNextCheck = () => {
-    if (!isActive) return
-
-    const now = new Date()
-    const nextTransition = findNextTransition(now, zone, engine)
-
-    if (nextTransition) {
-      const msUntilTransition = nextTransition.getTime() - now.getTime()
-
-      // Schedule callback slightly after the transition
-      const callbackDelay = Math.max(0, msUntilTransition + 1000) // +1 second buffer
-
-      currentTimeoutId = setTimeout(() => {
-        if (!isActive) return
-
-        callback(nextTransition)
-        scheduleNextCheck() // Schedule next transition
-      }, callbackDelay)
-    } else {
-      // No transition found, check again in 24 hours
-      currentTimeoutId = setTimeout(scheduleNextCheck, 24 * 60 * 60 * 1000)
-    }
+  const schedule = (delay: number, fn: () => void) => {
+    timeoutId = setTimeout(fn, Math.min(Math.max(0, delay), MAX_TIMEOUT_MS))
+    ;(timeoutId as { unref?: () => void }).unref?.()
   }
 
-  // Start watching
-  scheduleNextCheck()
+  const scheduleNext = () => {
+    if (!isActive) {
+      return
+    }
+    const now = Date.now()
+    const transition = nextTransition(zone, now, engine, DEFAULT_SEARCH_DAYS)
 
-  // Return cleanup function
+    if (!transition) {
+      schedule(DAY_MS, scheduleNext)
+      return
+    }
+
+    const waitUntil = () => {
+      if (!isActive) {
+        return
+      }
+      const remaining = transition.at - Date.now()
+      if (remaining > 0) {
+        // Timers cap out around 24.8 days; re-arm until the transition arrives
+        schedule(remaining + 1000, waitUntil)
+        return
+      }
+      callback(new Date(transition.at))
+      scheduleNext()
+    }
+    waitUntil()
+  }
+
+  scheduleNext()
+
   const cleanup = () => {
     isActive = false
-    if (currentTimeoutId) {
-      clearTimeout(currentTimeoutId)
-      currentTimeoutId = null
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+      timeoutId = null
     }
     activeWatchers.delete(cleanup)
   }
@@ -84,80 +270,8 @@ export function watchZoneTransitions(
 }
 
 /**
- * Find the next timezone transition after the given date
- */
-function findNextTransition(from: Date, zone: string, engine: TzEngine): Date | null {
-  try {
-    const currentOffset = engine.getOffset(from, zone)
-    const searchStart = new Date(from.getTime())
-
-    // Search forward in weekly increments to find offset change
-    let searchDate = new Date(searchStart.getTime())
-    const maxSearchWeeks = 104 // Search up to 2 years ahead
-
-    for (let week = 0; week < maxSearchWeeks; week++) {
-      searchDate.setTime(searchStart.getTime() + week * 7 * 24 * 60 * 60 * 1000)
-
-      const searchOffset = engine.getOffset(searchDate, zone)
-      if (searchOffset !== currentOffset) {
-        // Found a transition, now binary search to find exact time
-        return binarySearchTransition(
-          new Date(searchStart.getTime() + (week - 1) * 7 * 24 * 60 * 60 * 1000),
-          searchDate,
-          zone,
-          engine,
-          currentOffset
-        )
-      }
-    }
-
-    return null
-  } catch (error) {
-    console.warn(`Failed to find next transition for zone "${zone}":`, error)
-    return null
-  }
-}
-
-/**
- * Binary search to find the exact transition time within a range
- */
-function binarySearchTransition(
-  start: Date,
-  end: Date,
-  zone: string,
-  engine: TzEngine,
-  expectedStartOffset: number
-): Date | null {
-  try {
-    let left = start.getTime()
-    let right = end.getTime()
-    const precision = 60 * 1000 // 1 minute precision
-
-    while (right - left > precision) {
-      const mid = Math.floor((left + right) / 2)
-      const midDate = new Date(mid)
-      const midOffset = engine.getOffset(midDate, zone)
-
-      if (midOffset === expectedStartOffset) {
-        left = mid
-      } else {
-        right = mid
-      }
-    }
-
-    // Return the transition point
-    return new Date(right)
-  } catch (error) {
-    console.warn(`Failed to binary search transition for zone "${zone}":`, error)
-    return null
-  }
-}
-
-/**
- * Watch for regular time ticks
- *
- * This function calls the callback at regular intervals, useful for
- * updating clocks or other time-dependent UI elements.
+ * Call `callback` immediately and then every `granularityMs` (minimum 100ms),
+ * useful for updating clocks.
  */
 export function onTick(callback: (now: Date) => void, granularityMs: number = 1000): () => void {
   if (granularityMs < 100) {
@@ -169,10 +283,8 @@ export function onTick(callback: (now: Date) => void, granularityMs: number = 10
     callback(new Date())
   }
 
-  // Start with immediate tick
   tick()
 
-  // Schedule recurring ticks
   const intervalId = setInterval(tick, granularityMs)
 
   const watcher = {
@@ -183,147 +295,9 @@ export function onTick(callback: (now: Date) => void, granularityMs: number = 10
 
   activeTickWatchers.add(watcher)
 
-  // Return cleanup function
-  const cleanup = () => {
+  return () => {
     clearInterval(intervalId)
     activeTickWatchers.delete(watcher)
-  }
-
-  return cleanup
-}
-
-/**
- * Get information about the next timezone transition
- */
-export function getNextTransition(
-  zone: string,
-  from: Date = new Date(),
-  engine?: TzEngine
-): {
-  date: Date
-  fromOffset: number
-  toOffset: number
-  isDSTStart: boolean
-} | null {
-  if (!engine) {
-    return null
-  }
-
-  if (!engine.isValidTimeZone(zone)) {
-    return null
-  }
-
-  try {
-    const currentOffset = engine.getOffset(from, zone)
-    const transitionDate = findNextTransition(from, zone, engine)
-
-    if (!transitionDate) {
-      return null
-    }
-
-    const newOffset = engine.getOffset(transitionDate, zone)
-    const isDSTStart = newOffset > currentOffset
-
-    return {
-      date: transitionDate,
-      fromOffset: currentOffset,
-      toOffset: newOffset,
-      isDSTStart,
-    }
-  } catch (error) {
-    console.warn(`Failed to get next transition for zone "${zone}":`, error)
-    return null
-  }
-}
-
-/**
- * Get information about the previous timezone transition
- */
-export function getPreviousTransition(
-  zone: string,
-  from: Date = new Date(),
-  engine?: TzEngine
-): {
-  date: Date
-  fromOffset: number
-  toOffset: number
-  isDSTStart: boolean
-} | null {
-  if (!engine) {
-    return null
-  }
-
-  if (!engine.isValidTimeZone(zone)) {
-    return null
-  }
-
-  try {
-    const currentOffset = engine.getOffset(from, zone)
-    const searchStart = new Date(from.getTime())
-
-    // Search backward in weekly increments to find offset change
-    let searchDate = new Date(searchStart.getTime())
-    const maxSearchWeeks = 104 // Search up to 2 years back
-
-    for (let week = 1; week <= maxSearchWeeks; week++) {
-      searchDate.setTime(searchStart.getTime() - week * 7 * 24 * 60 * 60 * 1000)
-
-      const searchOffset = engine.getOffset(searchDate, zone)
-      if (searchOffset !== currentOffset) {
-        // Found a transition, now binary search to find exact time
-        const transitionDate = binarySearchTransition(
-          searchDate,
-          new Date(searchStart.getTime() - (week - 1) * 7 * 24 * 60 * 60 * 1000),
-          zone,
-          engine,
-          searchOffset
-        )
-
-        if (transitionDate) {
-          const isDSTStart = currentOffset > searchOffset
-
-          return {
-            date: transitionDate,
-            fromOffset: searchOffset,
-            toOffset: currentOffset,
-            isDSTStart,
-          }
-        }
-      }
-    }
-
-    return null
-  } catch (error) {
-    console.warn(`Failed to get previous transition for zone "${zone}":`, error)
-    return null
-  }
-}
-
-/**
- * Check if a date is near a timezone transition (within 24 hours)
- */
-export function isNearTransition(
-  date: Date,
-  zone: string,
-  engine?: TzEngine,
-  windowHours: number = 24
-): boolean {
-  if (!engine?.isValidTimeZone(zone)) {
-    return false
-  }
-
-  try {
-    const windowMs = windowHours * 60 * 60 * 1000
-    const before = new Date(date.getTime() - windowMs)
-    const after = new Date(date.getTime() + windowMs)
-
-    const offsetBefore = engine.getOffset(before, zone)
-    const offsetAt = engine.getOffset(date, zone)
-    const offsetAfter = engine.getOffset(after, zone)
-
-    return offsetBefore !== offsetAt || offsetAt !== offsetAfter
-  } catch {
-    return false
   }
 }
 
@@ -331,23 +305,13 @@ export function isNearTransition(
  * Cleanup all active watchers (useful for testing or app shutdown)
  */
 export function cleanupAllWatchers(): void {
-  // Clean up transition watchers
   for (const cleanup of activeWatchers) {
-    try {
-      cleanup()
-    } catch (error) {
-      console.warn('Error cleaning up transition watcher:', error)
-    }
+    cleanup()
   }
   activeWatchers.clear()
 
-  // Clean up tick watchers
   for (const watcher of activeTickWatchers) {
-    try {
-      clearInterval(watcher.timeoutId)
-    } catch (error) {
-      console.warn('Error cleaning up tick watcher:', error)
-    }
+    clearInterval(watcher.timeoutId)
   }
   activeTickWatchers.clear()
 }

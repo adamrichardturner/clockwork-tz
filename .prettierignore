@@ -1,0 +1,5 @@
+dist/
+coverage/
+package-lock.json
+src/tzdb/data.generated.ts
+packages/clockwork-tz-data/tzdb.json

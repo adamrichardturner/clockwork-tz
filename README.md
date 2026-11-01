@@ -1,21 +1,20 @@
 # clockwork-tz
 
-[![npm version](https://badge.fury.io/js/clockwork-tz.svg)](https://badge.fury.io/js/clockwork-tz)
-[![CI](https://github.com/adamturner/clockwork-tz/workflows/CI/badge.svg)](https://github.com/adamturner/clockwork-tz/actions)
-[![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![npm version](https://img.shields.io/npm/v/clockwork-tz.svg)](https://www.npmjs.com/package/clockwork-tz)
+[![CI](https://github.com/adamrichardturner/clockwork-tz/actions/workflows/ci.yml/badge.svg)](https://github.com/adamrichardturner/clockwork-tz/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-A comprehensive timezone library for JavaScript and TypeScript applications. Provides accurate timezone conversions with automatic DST handling, supporting both system-based and deterministic timezone calculations.
+Timezone conversions that get the weird zones right. clockwork-tz handles half-hour and
+45-minute offsets, 30-minute DST, skipped days, negative DST and historical local mean time,
+and it resolves local times inside DST gaps and overlaps exactly the way
+[Temporal](https://tc39.es/proposal-temporal/docs/) does.
 
-## Features
-
-- **Accurate conversions** - Handles unusual timezone offsets (+10:30, +8:45, +5:45) and complex DST rules
-- **Framework agnostic** - Works in Node.js, browsers, React Native, and Electron
-- **Dual engine architecture** - System Intl API (default) or optional embedded IANA tzdb for consistency
-- **TypeScript support** - Complete type definitions with strict typing
-- **Real-time capabilities** - DST transition watching and live clock utilities
-- **Zero dependencies** - Default engine uses platform APIs only
-- **Universal builds** - ESM and CommonJS with tree-shaking support
+- **Zero runtime dependencies.** The core uses the platform's `Intl` API (about 19 kB gzipped).
+- **Host independent.** Results never depend on the timezone of the machine running the code.
+- **Two engines.** `system-intl` uses the OS/browser timezone data. `embedded-tzdb` uses a
+  pinned IANA tzdb release (28 kB gzipped) for identical results everywhere, with optional
+  signed updates.
+- **ESM + CommonJS** with complete TypeScript types.
 
 ## Installation
 
@@ -23,328 +22,206 @@ A comprehensive timezone library for JavaScript and TypeScript applications. Pro
 npm install clockwork-tz
 ```
 
-## Quick Start
+Node.js 20 or later, or any browser with `Intl.DateTimeFormat` time zone support.
 
-```javascript
-import { initClockworkTZ, fromUTC, convert, format } from 'clockwork-tz'
+## Quick start
 
-// Initialize (optional - uses system timezone data by default)
-initClockworkTZ()
+```ts
+import { fromUTC, convert, interpretLocal, format } from 'clockwork-tz'
 
-// Convert UTC to any timezone
-const result = fromUTC('2024-07-15T14:00:00.000Z', 'Australia/Lord_Howe')
-console.log(result.local) // "2024-07-16 01:00:00.000"
-console.log(result.offsetMinutes) // 660 (+11:00 DST)
-console.log(result.isDST) // true
+fromUTC('2024-07-15T14:00:00Z', 'Australia/Lord_Howe')
+// {
+//   utc: '2024-07-15T14:00:00.000Z',
+//   zone: 'Australia/Lord_Howe',
+//   local: '2024-07-16 00:30:00.000',
+//   offsetMinutes: 630,
+//   isDST: false,
+//   abbreviation: '+1030',
+//   source: 'system-intl'
+// }
 
-// Convert between timezones
-const converted = convert('2024-07-15T16:30:00', 'Asia/Kathmandu', 'America/St_Johns')
-console.log(converted.local) // "2024-07-15 06:45:00.000"
+// Strings without an offset are wall-clock time in the source zone
+convert('2024-07-15T16:30:00', 'Asia/Kathmandu', 'America/St_Johns').local
+// '2024-07-15 08:15:00.000'
 
-// Format with patterns
-const formatted = format(new Date(), 'Pacific/Chatham', 'yyyy-MM-dd HH:mm zzz')
-console.log(formatted) // "2024-07-16 03:45 +1345"
+format('2024-07-15T14:00:00Z', 'Pacific/Chatham', 'yyyy-MM-dd HH:mm xxx')
+// '2024-07-16 02:45 +12:45'
+
+// 02:30 doesn't exist in New York on 10 March 2024: it resolves to 03:30 EDT
+interpretLocal('2024-03-10T02:30:00', 'America/New_York').local
+// '2024-03-10 03:30:00.000'
 ```
+
+Instants can be `Date` objects, epoch milliseconds, or ISO strings with an offset
+(`Z`, `+05:45`, `-0330`, `+00:19:32`). Zones are IANA identifiers (links such as
+`Asia/Calcutta` work) or fixed offsets such as `+05:30`.
+
+## DST gaps and overlaps
+
+A local time can be **skipped** (spring forward) or **repeated** (fall back).
+`interpretLocal` and `convert` take a `disambiguation` option with Temporal's semantics:
+
+| Option                   | Skipped time (gap)                  | Repeated time (overlap)     |
+| ------------------------ | ----------------------------------- | --------------------------- |
+| `compatible` _(default)_ | later instant (pushed past the gap) | earlier instant             |
+| `earliest`               | earlier instant (pulled before)     | earlier instant             |
+| `latest`                 | later instant                       | later instant               |
+| `reject`                 | throws `InvalidTimeError`           | throws `AmbiguousTimeError` |
+
+```ts
+import { interpretLocal, AmbiguousTimeError } from 'clockwork-tz'
+
+// 01:30 happens twice in New York on 3 November 2024
+interpretLocal('2024-11-03T01:30:00', 'America/New_York').utc // '2024-11-03T05:30:00.000Z' (EDT)
+interpretLocal('2024-11-03T01:30:00', 'America/New_York', { disambiguation: 'latest' }).utc
+// '2024-11-03T06:30:00.000Z' (EST)
+
+try {
+  interpretLocal('2024-11-03T01:30:00', 'America/New_York', { disambiguation: 'reject' })
+} catch (error) {
+  error instanceof AmbiguousTimeError // true
+}
+
+// Samoa skipped 30 December 2011 entirely
+interpretLocal('2011-12-30T12:00:00', 'Pacific/Apia').local // '2011-12-31 12:00:00.000'
+```
+
+This works the same for 30-minute DST (Lord Howe), 45-minute offsets (Chatham) and two-hour
+DST (Antarctica/Troll).
 
 ## Engines
 
-### System Intl Engine (Default)
+### `system-intl` (default)
 
-Uses platform `Intl.DateTimeFormat` and `date-fns-tz` for timezone calculations:
+Uses the timezone data built into Node.js or the browser (ICU). There's no data to ship, and
+updates arrive with the OS and runtime. Different platforms can be on different tzdb
+releases. `isDST` is derived by comparing a zone's January and July offsets, because `Intl`
+does not expose the DST flag.
 
-- No external data files
-- Automatic OS/browser updates
-- Suitable for most applications
+### `embedded-tzdb`
 
-### Embedded TZDB Engine (Optional)
+Uses a compiled IANA tzdb release for deterministic results on every platform, including
+exact DST flags and abbreviations, local mean time before standardisation, and every
+transition. A snapshot ships in the `clockwork-tz/tzdb` subpath, so you only pay for it if
+you import it:
 
-Uses a specific IANA timezone database version for deterministic results:
+```ts
+import { initClockworkTZ, tzdbVersion } from 'clockwork-tz'
+import { tzdb } from 'clockwork-tz/tzdb'
 
-- Consistent across all platforms
-- Optional CDN updates with verification
-- Ideal for applications requiring exact reproducibility
+await initClockworkTZ({ engine: 'embedded-tzdb', data: tzdb })
+tzdbVersion() // '2026f'
+```
 
-```javascript
-initClockworkTZ({
+#### Signed updates
+
+IANA publishes several releases a year, sometimes at short notice. To pick them up without
+releasing your app again, point the engine at the signed manifest:
+
+```ts
+import { initClockworkTZ, DEFAULT_MANIFEST_URL } from 'clockwork-tz'
+import { tzdb } from 'clockwork-tz/tzdb'
+
+await initClockworkTZ({
   engine: 'embedded-tzdb',
-  manifestURL: 'https://cdn.example.com/tzdb-manifest.json',
-  autoUpdateIntervalMs: 24 * 60 * 60 * 1000, // Daily updates
+  data: tzdb, // used immediately and whenever an update can't be verified
+  manifestURL: DEFAULT_MANIFEST_URL, // jsDelivr, from the clockwork-tz-data package
+  autoUpdateIntervalMs: 24 * 60 * 60 * 1000, // 0 disables periodic checks
 })
 ```
 
-## API Reference
+An update is only applied when all of these hold:
 
-### Core Functions
+- The manifest's Ed25519 signature verifies against the public key built into the library.
+- The data's SHA-256 matches the signed hash.
+- The version is newer than the data already loaded.
 
-#### `fromUTC(input, zone, options?)`
+Anything else keeps the current data. Verified data is cached in `localStorage` (browsers) or
+memory (Node), and other tabs are told about it through `BroadcastChannel`. If you host your
+own data, pass `publicKey`. See [SECURITY.md](./SECURITY.md) for the signing details.
 
-Convert UTC time to a specific timezone.
+## API
 
-```javascript
-const result = fromUTC('2024-07-15T14:00:00Z', 'Australia/Lord_Howe')
-// Returns ClockworkTime object with local time, offset, DST status
+### Conversion
+
+| Function                                               | Description                                                                         |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `fromUTC(instant, zone, opts?)`                        | Instant → `ClockworkTime` in `zone`                                                 |
+| `interpretLocal(wallTime, zone, opts?)`                | Wall-clock string (no offset) in `zone` → `ClockworkTime`                           |
+| `convert(input, fromZone, toZone, opts?)`              | Wall time in `fromZone` (or an instant) → `ClockworkTime` in `toZone`               |
+| `getZoneInfo(instant, zone)`                           | `{ offsetSeconds, isDST, abbreviation }`                                            |
+| `getOffset(instant, zone)`                             | Offset in minutes (fractional only for local mean time)                             |
+| `isDST(instant, zone)`                                 | `false` for invalid zones                                                           |
+| `isValidTimeZone(zone)` / `canonicalizeTimeZone(zone)` | Validation and canonical names (`Asia/Calcutta` → `Asia/Kolkata`)                   |
+| `getUserTimeZone()`                                    | The runtime's zone, falling back to `UTC`                                           |
+| `listTimeZones({ labelStyle, at, locale })`            | Zones sorted by offset; `labelStyle` is `original`, `offset`, `abbrev` or `altName` |
+
+`opts` accepts `format` (pattern for `local`), `locale` and `disambiguation`.
+
+### Formatting
+
+`format(instant, zone, pattern?, locale?)` supports this date-fns-compatible subset:
+
+| Token                 | Output                                         |
+| --------------------- | ---------------------------------------------- |
+| `yyyy` `yy` `y`       | Year: `2024`, `24`, `2024`                     |
+| `M` `MM` `MMM` `MMMM` | Month: `7`, `07`, `Jul`, `July`                |
+| `d` `dd`              | Day of month                                   |
+| `EEE` `EEEE`          | Weekday: `Mon`, `Monday`                       |
+| `H` `HH` `h` `hh` `a` | Hours (24h / 12h) and `AM`/`PM`                |
+| `m` `mm` `s` `ss`     | Minutes, seconds                               |
+| `S` `SS` `SSS`        | Fractional seconds                             |
+| `zzz` `zzzz`          | Abbreviation (`EDT`, `+0545`), long name       |
+| `x` `xx` `xxx`        | Offset: `+0545`, `+0545`, `+05:45`             |
+| `xxxx` `xxxxx`        | Offset with seconds when non-zero: `+05:53:28` |
+| `X…`                  | As `x`, but `Z` for UTC                        |
+| `O` `OOOO`            | `GMT+5:45`, `GMT+05:45`                        |
+| `'text'`, `''`        | Literal text, literal quote                    |
+
+Unsupported tokens throw `TimezoneError`. `FORMAT_PATTERNS` provides common patterns, and
+there are also `formatWithPattern`, `formatFor`, `formatRange`, `formatDuration`,
+`formatRelative`, `formatNow`, `formatOffset` and `isValidFormatPattern`.
+
+### Transitions and clocks
+
+```ts
+import { getNextTransition, getTransitions, watchZoneTransitions, onTick } from 'clockwork-tz'
+
+getNextTransition('Australia/Lord_Howe', '2024-07-15T14:00:00Z')
+// { date: 2024-10-05T15:30:00.000Z, fromOffset: 630, toOffset: 660,
+//   isDSTStart: true, isDSTEnd: false, fromAbbreviation: '+1030', toAbbreviation: '+11' }
+
+getTransitions('Pacific/Chatham', '2024-01-01T00:00:00Z', '2025-01-01T00:00:00Z') // two transitions
+
+const stopWatching = watchZoneTransitions('Europe/London', at => rerender(at))
+const stopTicking = onTick(now => rerender(now), 1000)
 ```
 
-#### `interpretLocal(localISO, zone, options?)`
+Transitions are exact (to the second) with both engines. Watchers handle transitions more
+than 24.8 days away, the `setTimeout` limit. Call `cleanupAllWatchers()` on shutdown.
 
-Interpret a local time string in a specific timezone with disambiguation for DST transitions.
+### Parsing
 
-```javascript
-// Handle ambiguous time during fall-back transition
-const result = interpretLocal('2024-11-03T01:30:00', 'America/New_York', {
-  disambiguation: 'latest', // 'earliest', 'latest', or 'reject'
-})
-```
+`parse`, `parseDate`, `safeParse`, `isParseable`, `parseAny`, `parseRange`, `parseTime`,
+`parseOffset`, `parseComponents` and `normalize` parse ISO 8601 strictly. Strings without an
+offset are read in `defaultTimezone` (default `UTC`), never in the host's timezone.
 
-#### `convert(input, fromZone, toZone, options?)`
+### Lifecycle
 
-Convert time from one timezone to another.
+`initClockworkTZ(options)` (returns a promise once any manifest load has been attempted),
+`dispose()`, `engine()`, `tzdbVersion()`, `getStatus()`, `onDataUpdate(callback)`,
+`refreshTimezoneData()`, `setEngine(engine)` and `getCurrentEngine()`.
 
-```javascript
-const result = convert('2024-07-15T14:30:00', 'Asia/Kathmandu', 'Pacific/Chatham')
-```
+## Unusual zones covered by the test suite
 
-#### `format(input, zone, pattern?)`
-
-Format a date/time in a specific timezone using date-fns patterns.
-
-```javascript
-const formatted = format(new Date(), 'Europe/London', 'yyyy-MM-dd HH:mm zzz')
-```
-
-### Utility Functions
-
-#### `getOffset(input, zone)` & `isDST(input, zone)`
-
-```javascript
-const offset = getOffset(new Date(), 'Australia/Eucla') // 525 minutes (+8:45)
-const inDST = isDST(new Date(), 'America/New_York') // true/false
-```
-
-#### `listTimeZones(options?)`
-
-```javascript
-const zones = listTimeZones({ labelStyle: 'offset' })
-// Returns array of { value: string, label: string, offsetMinutes: number }
-```
-
-### Real-time Features
-
-#### `onTick(callback, granularityMs?)`
-
-```javascript
-const stopTicking = onTick(now => {
-  console.log('Current time:', format(now, 'UTC'))
-}, 1000)
-
-// Later: stopTicking()
-```
-
-#### `watchZoneTransitions(zone, callback)`
-
-```javascript
-const stopWatching = watchZoneTransitions('America/New_York', transitionDate => {
-  console.log('DST transition at:', transitionDate)
-})
-```
-
-## Handling DST Transitions
-
-The library properly handles problematic times during DST transitions:
-
-### Invalid Times (Spring Forward)
-
-```javascript
-try {
-  // This time doesn't exist (2 AM becomes 3 AM)
-  interpretLocal('2024-03-10T02:30:00', 'America/New_York', {
-    disambiguation: 'reject',
-  })
-} catch (error) {
-  console.log(error instanceof InvalidTimeError) // true
-}
-
-// Or handle gracefully
-const result = interpretLocal('2024-03-10T02:30:00', 'America/New_York', {
-  disambiguation: 'latest', // Use time after the gap
-})
-```
-
-### Ambiguous Times (Fall Back)
-
-```javascript
-// This time occurs twice (1:30 AM happens twice)
-const first = interpretLocal('2024-11-03T01:30:00', 'America/New_York', {
-  disambiguation: 'earliest', // First occurrence (DST)
-})
-
-const second = interpretLocal('2024-11-03T01:30:00', 'America/New_York', {
-  disambiguation: 'latest', // Second occurrence (standard)
-})
-
-console.log(first.isDST) // true
-console.log(second.isDST) // false
-```
-
-## Unusual Timezone Support
-
-The library handles timezone offsets that often cause issues in other libraries:
-
-```javascript
-// Lord Howe Island: +10:30 standard, +11:00 DST (30-minute shift)
-const lordHowe = fromUTC('2024-01-15T12:00:00Z', 'Australia/Lord_Howe')
-console.log(lordHowe.offsetMinutes) // 660 (+11:00)
-
-// Eucla: Fixed +8:45 offset
-const eucla = fromUTC('2024-07-15T12:00:00Z', 'Australia/Eucla')
-console.log(eucla.offsetMinutes) // 525 (+8:45)
-
-// Nepal: +5:45 offset
-const kathmandu = fromUTC('2024-07-15T12:00:00Z', 'Asia/Kathmandu')
-console.log(kathmandu.offsetMinutes) // 345 (+5:45)
-
-// Chatham Islands: +12:45 standard, +13:45 DST
-const chatham = fromUTC('2024-01-15T12:00:00Z', 'Pacific/Chatham')
-console.log(chatham.offsetMinutes) // 825 (+13:45)
-
-// Newfoundland: -3:30 standard, -2:30 DST
-const stjohns = fromUTC('2024-07-15T12:00:00Z', 'America/St_Johns')
-console.log(stjohns.offsetMinutes) // -150 (-2:30)
-```
-
-## Environment Support
-
-### Node.js
-
-```javascript
-const { initClockworkTZ, fromUTC } = require('clockwork-tz')
-// or
-import { initClockworkTZ, fromUTC } from 'clockwork-tz'
-```
-
-### Browser
-
-```html
-<script type="module">
-  import { initClockworkTZ, fromUTC } from 'https://cdn.skypack.dev/clockwork-tz'
-</script>
-```
-
-### React/Vue/Angular
-
-```javascript
-import { initClockworkTZ, onTick } from 'clockwork-tz'
-
-// React hook example
-function useWorldClock(zones) {
-  const [times, setTimes] = useState({})
-
-  useEffect(() => {
-    return onTick(now => {
-      const newTimes = {}
-      zones.forEach(zone => {
-        newTimes[zone] = fromUTC(now, zone)
-      })
-      setTimes(newTimes)
-    }, 1000)
-  }, [zones])
-
-  return times
-}
-```
-
-## Format Patterns
-
-Built-in format patterns for common use cases:
-
-```javascript
-import { FORMAT_PATTERNS, formatWithPattern } from 'clockwork-tz'
-
-const date = new Date()
-const zone = 'Europe/Paris'
-
-formatWithPattern(date, zone, 'default') // "2024-07-15 16:30:00 CEST"
-formatWithPattern(date, zone, 'human') // "July 15, 2024 at 4:30 PM CEST"
-formatWithPattern(date, zone, 'iso8601') // "2024-07-15T16:30:00+02:00"
-formatWithPattern(date, zone, 'rfc2822') // "Mon, 15 Jul 2024 16:30:00 +0200"
-```
-
-## TypeScript Support
-
-Complete TypeScript definitions included:
-
-```typescript
-import type { ClockworkTime, Disambiguation, EngineKind } from 'clockwork-tz'
-
-interface ClockworkTime {
-  utc: string
-  zone: string
-  local: string
-  offsetMinutes: number
-  isDST: boolean
-  source: EngineKind
-  tzdbVersion?: string
-}
-```
-
-## Testing
-
-```bash
-npm test                    # Run all tests
-npm run test:watch         # Watch mode
-npm run test:coverage      # With coverage report
-```
-
-The test suite covers:
-
-- Unusual timezone offset calculations
-- DST transition edge cases
-- Ambiguous time handling
-- Round-trip conversion accuracy
-- Historical date processing
-
-## Bundle Size
-
-| Engine        | Gzipped | Notes                       |
-| ------------- | ------- | --------------------------- |
-| system-intl   | ~15KB   | Uses platform timezone data |
-| embedded-tzdb | ~45KB   | Includes IANA tzdb subset   |
-
-Tree-shaking friendly - only import what you use.
-
-## Contributing
-
-Contributions are welcome. Please read the contributing guidelines and ensure all tests pass before submitting a pull request.
+Lord Howe (+10:30 with 30-minute DST), Chatham (+12:45/+13:45), Eucla (+8:45), Kathmandu
+(+5:45), Marquesas (−9:30), Kiritimati (+14), Samoa's skipped day in 2011, Casablanca's
+Ramadan suspensions, Dublin's negative DST, Troll's two-hour DST, Caracas 2016, Pyongyang 2015
+and 2018, `Etc/GMT+5` sign inversion, renamed zones such as `Europe/Kiev`, local mean time
+before 1900, and rules beyond 2100. Both engines are tested against the same fixtures. The
+embedded data is checked against ICU for every zone from 1970 onwards, and the suite runs
+under several host timezones and in Chromium, Firefox and WebKit.
 
 ## License
 
-MIT License - see LICENSE file for details.
-
-## Known Limitations
-
-- Future timezone rule changes require updates
-- Historical accuracy limited by platform data (pre-1970)
-- JavaScript Date limitations (no leap second support)
-- Some unusual timezone identifiers may not be supported by system engine
-
-## Migration
-
-### From moment-timezone
-
-```javascript
-// Before
-moment.tz('2024-07-15 14:00', 'America/New_York').format()
-
-// After
-format('2024-07-15T14:00:00', 'America/New_York')
-```
-
-### From date-fns-tz
-
-```javascript
-// Before
-formatInTimeZone(date, 'Europe/London', 'yyyy-MM-dd HH:mm zzz')
-
-// After
-format(date, 'Europe/London', 'yyyy-MM-dd HH:mm zzz')
-```
+[MIT](./LICENSE) © Adam Turner

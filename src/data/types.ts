@@ -5,11 +5,21 @@
 /** Engine types supported by clockwork-tz */
 export type EngineKind = 'system-intl' | 'embedded-tzdb'
 
-/** Disambiguation strategy for ambiguous local times during DST transitions */
-export type Disambiguation = 'earliest' | 'latest' | 'reject'
+/**
+ * Disambiguation strategy for local times that are skipped (gap) or repeated
+ * (overlap) by a transition. Semantics match Temporal:
+ * - `compatible`: later instant for gaps, earlier instant for overlaps (default)
+ * - `earliest`: the earlier of the two candidate instants
+ * - `latest`: the later of the two candidate instants
+ * - `reject`: throw InvalidTimeError (gap) or AmbiguousTimeError (overlap)
+ */
+export type Disambiguation = 'compatible' | 'earliest' | 'latest' | 'reject'
 
 /** Label style options for timezone listing */
 export type LabelStyle = 'original' | 'offset' | 'abbrev' | 'altName'
+
+/** Anything that identifies an instant: ISO string with offset, Date, or epoch milliseconds */
+export type DateInput = string | Date | number
 
 /**
  * Complete timezone-aware time representation
@@ -21,14 +31,43 @@ export interface ClockworkTime {
   zone: string
   /** Formatted local civil time */
   local: string
-  /** Offset from UTC in minutes (e.g., 630 for +10:30) */
+  /**
+   * Offset from UTC in minutes (e.g., 630 for +10:30). Fractional only for
+   * historical local mean time offsets such as Amsterdam's +00:19:32.
+   */
   offsetMinutes: number
   /** Whether this time is during Daylight Saving Time */
   isDST: boolean
+  /** Timezone abbreviation in effect (e.g., "EST", "+0545") */
+  abbreviation: string
   /** The engine that produced this result */
   source: EngineKind
   /** TZDB version (only available for embedded-tzdb engine) */
   tzdbVersion?: string
+}
+
+/**
+ * Offset, DST flag and abbreviation in effect at an instant
+ */
+export interface ZoneInfo {
+  /** Offset from UTC in seconds */
+  offsetSeconds: number
+  /** Whether daylight saving time is in effect */
+  isDST: boolean
+  /** Abbreviation in effect */
+  abbreviation: string
+}
+
+/**
+ * A change of offset, DST flag or abbreviation in a zone
+ */
+export interface Transition {
+  /** Instant of the transition in epoch milliseconds */
+  at: number
+  /** Zone info in effect just before the transition */
+  before: ZoneInfo
+  /** Zone info in effect from the transition onwards */
+  after: ZoneInfo
 }
 
 /**
@@ -37,8 +76,10 @@ export interface ClockworkTime {
 export interface ListOptions {
   /** Style for timezone labels */
   labelStyle?: LabelStyle
-  /** User's timezone for biasing label generation */
-  forZone?: string
+  /** Instant used to compute offsets and labels (default: now) */
+  at?: DateInput
+  /** Locale used for long timezone names (default: "en") */
+  locale?: string
 }
 
 /**
@@ -59,9 +100,13 @@ export interface TimeZoneItem {
 export interface ClockworkOptions {
   /** Engine to use for timezone calculations */
   engine?: EngineKind
-  /** URL for CDN-hosted timezone database manifest */
+  /** Timezone data for the embedded-tzdb engine (e.g. from `clockwork-tz/tzdb`) */
+  data?: unknown
+  /** URL of a signed timezone database manifest to load and keep fresh */
   manifestURL?: string
-  /** Auto-update interval in milliseconds (default: 24 hours) */
+  /** Base64 raw Ed25519 public key used to verify manifests (default: the project key) */
+  publicKey?: string
+  /** Auto-update interval in milliseconds (default: 24 hours, 0 disables) */
   autoUpdateIntervalMs?: number
 }
 
@@ -69,20 +114,23 @@ export interface ClockworkOptions {
  * Formatting options
  */
 export interface FormatOptions {
-  /** Custom format pattern (date-fns compatible) */
+  /** Custom format pattern (date-fns compatible subset) */
   format?: string
+  /** Locale for month, weekday and day period names (default: "en") */
+  locale?: string
 }
 
 /**
  * Conversion options
  */
 export interface ConvertOptions extends FormatOptions {
-  /** Disambiguation strategy for ambiguous times */
+  /** Disambiguation strategy for skipped or repeated local times */
   disambiguation?: Disambiguation
 }
 
 /**
- * Engine interface that all timezone engines must implement
+ * Primitives every timezone engine must implement. All higher-level behaviour
+ * (local time interpretation, formatting, transitions) is built on these.
  */
 export interface TzEngine {
   /** Engine identifier */
@@ -94,42 +142,43 @@ export interface TzEngine {
   /** Check if a timezone is valid */
   isValidTimeZone(zone: string): boolean
 
-  /** Get user's current timezone */
-  getUserTimeZone(): string
+  /** Canonical spelling of a valid zone (links resolved where the engine knows them) */
+  canonicalize(zone: string): string
 
-  /** Convert UTC time to timezone */
-  fromUTC(utc: Date, zone: string): ClockworkTime
+  /** All zone identifiers the engine can list */
+  listZoneIds(): string[]
 
-  /** Interpret local time in timezone */
-  interpretLocal(localISO: string, zone: string, disambiguation: Disambiguation): ClockworkTime
+  /** Offset, DST flag and abbreviation in effect at an instant */
+  getZoneInfo(epochMs: number, zone: string): ZoneInfo
 
-  /** Get timezone offset at specific time */
-  getOffset(time: Date, zone: string): number
+  /** Exact transitions in [fromMs, toMs), when the engine knows them */
+  getTransitions?(zone: string, fromMs: number, toMs: number): Transition[]
+}
 
-  /** Check if time is in DST */
-  isDST(time: Date, zone: string): boolean
-
-  /** List available timezones */
-  listTimeZones(options: ListOptions): TimeZoneItem[]
-
-  /** Format time in timezone */
-  format(time: Date, zone: string, pattern: string): string
+/**
+ * Engine that can load timezone data at runtime
+ */
+export interface LoadableEngine extends TzEngine {
+  loadTzdbData(data: unknown): void
+  isDataLoaded(): boolean
 }
 
 /**
  * Timezone database manifest structure
  */
 export interface TzdbManifest {
-  /** TZDB version */
+  /** TZDB version, e.g. "2026a" */
   version: string
   /** Release date */
   releaseDate: string
-  /** Data URL */
+  /** Data URL (absolute, or relative to the manifest URL) */
   dataUrl: string
-  /** Signature for verification */
+  /** Hex SHA-256 of the data file bytes */
+  sha256: string
+  /** Base64 Ed25519 signature over `${version}\n${sha256}` */
   signature: string
-  /** ETag for caching */
-  etag?: string
+  /** Identifier of the signing key */
+  keyId: string
 }
 
 /**
@@ -140,8 +189,6 @@ export interface CachedTzdbData {
   version: string
   /** Cached timestamp */
   cachedAt: number
-  /** ETag from server */
-  etag?: string | undefined
   /** Actual timezone data */
   data: unknown
 }
@@ -158,14 +205,10 @@ export interface Environment {
   hasBroadcastChannel: boolean
   /** localStorage available */
   hasLocalStorage: boolean
-  /** Cache API available */
-  hasCacheAPI: boolean
-  /** File system access available */
-  hasFileSystem: boolean
 }
 
 /**
- * Error thrown when embedded TZDB engine is not yet implemented
+ * Error thrown when a feature is not available for the current engine
  */
 export class NotImplementedError extends Error {
   constructor(message: string) {
@@ -178,8 +221,8 @@ export class NotImplementedError extends Error {
  * Error thrown for invalid timezone operations
  */
 export class TimezoneError extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
     this.name = 'TimezoneError'
   }
 }

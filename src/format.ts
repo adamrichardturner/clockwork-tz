@@ -1,15 +1,25 @@
 /**
- * Date formatting utilities using date-fns-tz
+ * Dependency-free date formatting in any timezone.
+ *
+ * Patterns use a date-fns compatible subset of Unicode tokens. Letters must be
+ * quoted ('like this') to appear literally; '' produces a single quote.
  */
 
-import { formatInTimeZone } from 'date-fns-tz'
+import type { DateInput, TzEngine } from './data/types.js'
 import { TimezoneError } from './data/types.js'
+import { getEngine } from './core/state.js'
+import { assertValidZone, zoneInfoAt } from './core/zone.js'
 import { normalizeToDate } from './utils/iso.js'
 
 /**
  * Default format pattern
  */
 export const DEFAULT_FORMAT_PATTERN = 'yyyy-MM-dd HH:mm:ss zzz'
+
+/**
+ * Pattern used for ClockworkTime.local
+ */
+export const LOCAL_TIME_PATTERN = 'yyyy-MM-dd HH:mm:ss.SSS'
 
 /**
  * Common format patterns
@@ -28,7 +38,7 @@ export const FORMAT_PATTERNS = {
   dateTime: 'yyyy-MM-dd HH:mm:ss',
 
   /** ISO datetime with milliseconds: 2024-03-15 14:30:00.123 */
-  dateTimeMs: 'yyyy-MM-dd HH:mm:ss.SSS',
+  dateTimeMs: LOCAL_TIME_PATTERN,
 
   /** 12-hour format: 2024-03-15 2:30:00 PM PST */
   amPm: 'yyyy-MM-dd h:mm:ss a zzz',
@@ -49,33 +59,293 @@ export const FORMAT_PATTERNS = {
   iso8601: "yyyy-MM-dd'T'HH:mm:ssxxx",
 } as const
 
+type Token = { literal: string } | { letter: string; count: number }
+
+const SUPPORTED: Record<string, readonly number[]> = {
+  y: [1, 2, 3, 4, 5, 6],
+  M: [1, 2, 3, 4],
+  d: [1, 2],
+  E: [1, 2, 3, 4],
+  H: [1, 2],
+  h: [1, 2],
+  m: [1, 2],
+  s: [1, 2],
+  S: [1, 2, 3],
+  a: [1, 2, 3],
+  z: [1, 2, 3, 4],
+  x: [1, 2, 3, 4, 5],
+  X: [1, 2, 3, 4, 5],
+  O: [1, 4],
+}
+
+const tokenCache = new Map<string, Token[]>()
+
+function tokenize(pattern: string): Token[] {
+  const cached = tokenCache.get(pattern)
+  if (cached) {
+    return cached
+  }
+
+  const tokens: Token[] = []
+  let i = 0
+  while (i < pattern.length) {
+    const ch = pattern[i]!
+    if (ch === "'") {
+      // '' is a literal quote; otherwise read until the closing quote,
+      // where '' inside the quoted text is also a literal quote
+      if (pattern[i + 1] === "'") {
+        tokens.push({ literal: "'" })
+        i += 2
+        continue
+      }
+      let text = ''
+      let j = i + 1
+      for (;;) {
+        if (j >= pattern.length) {
+          throw new TimezoneError(`Unterminated quote in format pattern: ${pattern}`)
+        }
+        if (pattern[j] === "'") {
+          if (pattern[j + 1] === "'") {
+            text += "'"
+            j += 2
+            continue
+          }
+          break
+        }
+        text += pattern[j]
+        j++
+      }
+      tokens.push({ literal: text })
+      i = j + 1
+      continue
+    }
+    if (/[A-Za-z]/.test(ch)) {
+      let count = 1
+      while (pattern[i + count] === ch) {
+        count++
+      }
+      const allowed = SUPPORTED[ch]
+      if (!allowed?.includes(count)) {
+        throw new TimezoneError(`Unsupported format token "${ch.repeat(count)}" in ${pattern}`)
+      }
+      tokens.push({ letter: ch, count })
+      i += count
+      continue
+    }
+    tokens.push({ literal: ch })
+    i++
+  }
+
+  if (tokenCache.size > 256) {
+    tokenCache.clear()
+  }
+  tokenCache.set(pattern, tokens)
+  return tokens
+}
+
+const nameFormatters = new Map<string, Intl.DateTimeFormat>()
+
+function nameFormatter(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = `${locale}|${JSON.stringify(options)}`
+  let formatter = nameFormatters.get(key)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' })
+    nameFormatters.set(key, formatter)
+  }
+  return formatter
+}
+
+function namePart(
+  wall: Date,
+  locale: string,
+  options: Intl.DateTimeFormatOptions,
+  type: Intl.DateTimeFormatPartTypes
+): string {
+  const part = nameFormatter(locale, options)
+    .formatToParts(wall)
+    .find(p => p.type === type)
+  return part?.value ?? ''
+}
+
+function longZoneName(epochMs: number, zone: string, locale: string, fallback: string): string {
+  try {
+    const part = new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: 'long' })
+      .formatToParts(epochMs)
+      .find(p => p.type === 'timeZoneName')
+    return part?.value ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+function pad(n: number, length: number): string {
+  const sign = n < 0 ? '-' : ''
+  return sign + String(Math.abs(n)).padStart(length, '0')
+}
+
+function formatOffsetToken(offsetSeconds: number, letter: 'x' | 'X', count: number): string {
+  if (letter === 'X' && offsetSeconds === 0) {
+    return 'Z'
+  }
+  const sign = offsetSeconds < 0 ? '-' : '+'
+  const abs = Math.abs(offsetSeconds)
+  const hh = pad(Math.floor(abs / 3600), 2)
+  const mm = pad(Math.floor((abs % 3600) / 60), 2)
+  const ss = pad(abs % 60, 2)
+  const hasSeconds = abs % 60 !== 0
+
+  switch (count) {
+    case 1: {
+      return `${sign}${hh}${mm === '00' ? '' : mm}`
+    }
+    case 2: {
+      return `${sign}${hh}${mm}`
+    }
+    case 3: {
+      return `${sign}${hh}:${mm}`
+    }
+    case 4: {
+      return `${sign}${hh}${mm}${hasSeconds ? ss : ''}`
+    }
+    default: {
+      return `${sign}${hh}:${mm}${hasSeconds ? `:${ss}` : ''}`
+    }
+  }
+}
+
+function formatGmtToken(offsetSeconds: number, count: number): string {
+  if (offsetSeconds === 0) {
+    return 'GMT'
+  }
+  const sign = offsetSeconds < 0 ? '-' : '+'
+  const abs = Math.abs(offsetSeconds)
+  const hours = Math.floor(abs / 3600)
+  const minutes = Math.floor((abs % 3600) / 60)
+  if (count === 4) {
+    return `GMT${sign}${pad(hours, 2)}:${pad(minutes, 2)}`
+  }
+  return `GMT${sign}${hours}${minutes ? `:${pad(minutes, 2)}` : ''}`
+}
+
+/**
+ * Format an instant in a zone with an explicit engine. Used internally by
+ * the API; most callers want `format`.
+ */
+export function formatInstant(
+  epochMs: number,
+  zone: string,
+  pattern: string,
+  engine: TzEngine,
+  locale = 'en'
+): string {
+  const tokens = tokenize(pattern)
+  const info = zoneInfoAt(epochMs, zone, engine)
+  const wall = new Date(epochMs + info.offsetSeconds * 1000)
+
+  let out = ''
+  for (const token of tokens) {
+    if ('literal' in token) {
+      out += token.literal
+      continue
+    }
+
+    const { letter, count } = token
+    switch (letter) {
+      case 'y': {
+        const year = wall.getUTCFullYear()
+        out += count === 2 ? pad(((year % 100) + 100) % 100, 2) : pad(year, count)
+        break
+      }
+      case 'M': {
+        const month = wall.getUTCMonth() + 1
+        if (count <= 2) {
+          out += pad(month, count)
+        } else {
+          const style = count === 3 ? 'short' : 'long'
+          out += namePart(wall, locale, { month: style, day: 'numeric' }, 'month')
+        }
+        break
+      }
+      case 'd': {
+        out += pad(wall.getUTCDate(), count)
+        break
+      }
+      case 'E': {
+        const style = count === 4 ? 'long' : 'short'
+        out += namePart(wall, locale, { weekday: style }, 'weekday')
+        break
+      }
+      case 'H': {
+        out += pad(wall.getUTCHours(), count)
+        break
+      }
+      case 'h': {
+        out += pad(wall.getUTCHours() % 12 || 12, count)
+        break
+      }
+      case 'm': {
+        out += pad(wall.getUTCMinutes(), count)
+        break
+      }
+      case 's': {
+        out += pad(wall.getUTCSeconds(), count)
+        break
+      }
+      case 'S': {
+        out += pad(wall.getUTCMilliseconds(), 3).slice(0, count)
+        break
+      }
+      case 'a': {
+        const period = namePart(wall, locale, { hour: 'numeric', hour12: true }, 'dayPeriod')
+        out += period || (wall.getUTCHours() < 12 ? 'AM' : 'PM')
+        break
+      }
+      case 'z': {
+        out +=
+          count === 4 ? longZoneName(epochMs, zone, locale, info.abbreviation) : info.abbreviation
+        break
+      }
+      case 'x':
+      case 'X': {
+        out += formatOffsetToken(info.offsetSeconds, letter, count)
+        break
+      }
+      case 'O': {
+        out += formatGmtToken(info.offsetSeconds, count)
+        break
+      }
+    }
+  }
+  return out
+}
+
 /**
  * Format a date/time in a specific timezone
  *
- * @param input - Date object or ISO string to format
- * @param zone - IANA timezone identifier
+ * @param input - Date, epoch milliseconds, or ISO string with offset
+ * @param zone - IANA timezone identifier or fixed offset like "+05:30"
  * @param pattern - Format pattern (defaults to DEFAULT_FORMAT_PATTERN)
+ * @param locale - Locale for month, weekday and day period names (default "en")
  * @returns Formatted date string
- * @throws TimezoneError if timezone is invalid or formatting fails
+ * @throws TimezoneError if timezone is invalid or the pattern is unsupported
  */
 export function format(
-  input: string | Date,
+  input: DateInput,
   zone: string,
-  pattern: string = DEFAULT_FORMAT_PATTERN
+  pattern: string = DEFAULT_FORMAT_PATTERN,
+  locale = 'en'
 ): string {
-  try {
-    const date = normalizeToDate(input)
-    return formatInTimeZone(date, zone, pattern)
-  } catch (error) {
-    throw new TimezoneError(`Failed to format date in timezone "${zone}": ${error}`)
-  }
+  const engine = getEngine()
+  assertValidZone(zone, engine)
+  const date = normalizeToDate(input)
+  return formatInstant(date.getTime(), zone, pattern, engine, locale)
 }
 
 /**
  * Format a date using a predefined pattern
  */
 export function formatWithPattern(
-  input: string | Date,
+  input: DateInput,
   zone: string,
   patternName: keyof typeof FORMAT_PATTERNS
 ): string {
@@ -98,23 +368,18 @@ export function formatNow(zone: string, pattern?: string): string {
  * Format a date for different common use cases
  */
 export function formatFor(
-  input: string | Date,
+  input: DateInput,
   zone: string,
   useCase: 'display' | 'log' | 'filename' | 'api' | 'human'
 ): string {
   switch (useCase) {
-    case 'display': {
-      return format(input, zone, FORMAT_PATTERNS.default)
-    }
-    case 'log': {
+    case 'log':
+    case 'api': {
       return format(input, zone, FORMAT_PATTERNS.iso8601)
     }
     case 'filename': {
       // Safe for filenames (no colons or spaces)
       return format(input, zone, 'yyyy-MM-dd_HH-mm-ss')
-    }
-    case 'api': {
-      return format(input, zone, FORMAT_PATTERNS.iso8601)
     }
     case 'human': {
       return format(input, zone, FORMAT_PATTERNS.human)
@@ -129,8 +394,8 @@ export function formatFor(
  * Format a date range in a timezone
  */
 export function formatRange(
-  start: string | Date,
-  end: string | Date,
+  start: DateInput,
+  end: DateInput,
   zone: string,
   options: {
     pattern?: string
@@ -143,32 +408,26 @@ export function formatRange(
   const startDate = normalizeToDate(start)
   const endDate = normalizeToDate(end)
 
-  // Check if dates are on the same day
   if (sameDay) {
     const startDay = format(startDate, zone, 'yyyy-MM-dd')
     const endDay = format(endDate, zone, 'yyyy-MM-dd')
 
     if (startDay === endDay) {
-      // Same day - show date once, then time range
-      const dateStr = format(startDate, zone, 'yyyy-MM-dd')
       const startTime = format(startDate, zone, 'HH:mm')
       const endTime = format(endDate, zone, 'HH:mm zzz')
-      return `${dateStr} ${startTime}${separator}${endTime}`
+      return `${startDay} ${startTime}${separator}${endTime}`
     }
   }
 
-  // Different days or sameDay disabled
-  const startStr = format(startDate, zone, pattern)
-  const endStr = format(endDate, zone, pattern)
-  return `${startStr}${separator}${endStr}`
+  return `${format(startDate, zone, pattern)}${separator}${format(endDate, zone, pattern)}`
 }
 
 /**
  * Format duration between two dates
  */
 export function formatDuration(
-  start: string | Date,
-  end: string | Date,
+  start: DateInput,
+  end: DateInput,
   options: {
     units?: Array<'days' | 'hours' | 'minutes' | 'seconds'>
     precision?: number
@@ -176,100 +435,76 @@ export function formatDuration(
 ): string {
   const { units = ['days', 'hours', 'minutes'], precision = 2 } = options
 
-  const startDate = normalizeToDate(start)
-  const endDate = normalizeToDate(end)
-  const diffMs = Math.abs(endDate.getTime() - startDate.getTime())
+  const diffMs = Math.abs(normalizeToDate(end).getTime() - normalizeToDate(start).getTime())
 
+  const unitMs = { days: 86_400_000, hours: 3_600_000, minutes: 60_000, seconds: 1000 } as const
   const parts: string[] = []
   let remaining = diffMs
 
-  if (units.includes('days')) {
-    const days = Math.floor(remaining / (24 * 60 * 60 * 1000))
-    if (days > 0) {
-      parts.push(`${days} day${days !== 1 ? 's' : ''}`)
-      remaining %= 24 * 60 * 60 * 1000
+  for (const unit of ['days', 'hours', 'minutes', 'seconds'] as const) {
+    if (!units.includes(unit)) {
+      continue
+    }
+    const value = Math.floor(remaining / unitMs[unit])
+    remaining -= value * unitMs[unit]
+    if (value > 0 || parts.length > 0) {
+      parts.push(`${value} ${unit.slice(0, -1)}${value === 1 ? '' : 's'}`)
     }
   }
 
-  if (units.includes('hours')) {
-    const hours = Math.floor(remaining / (60 * 60 * 1000))
-    if (hours > 0 || parts.length > 0) {
-      parts.push(`${hours} hour${hours !== 1 ? 's' : ''}`)
-      remaining %= 60 * 60 * 1000
-    }
-  }
-
-  if (units.includes('minutes')) {
-    const minutes = Math.floor(remaining / (60 * 1000))
-    if (minutes > 0 || parts.length > 0) {
-      parts.push(`${minutes} minute${minutes !== 1 ? 's' : ''}`)
-      remaining %= 60 * 1000
-    }
-  }
-
-  if (units.includes('seconds')) {
-    const seconds = Math.floor(remaining / 1000)
-    if (seconds > 0 || parts.length === 0) {
-      parts.push(`${seconds} second${seconds !== 1 ? 's' : ''}`)
-    }
+  if (parts.length === 0) {
+    const smallest = units[units.length - 1] ?? 'seconds'
+    parts.push(`0 ${smallest}`)
   }
 
   return parts.slice(0, precision).join(', ')
 }
 
 /**
- * Format relative time (e.g., "2 hours ago", "in 3 days")
+ * Format relative time (e.g., "2 hours ago", "in 3 days"). Beyond a week the
+ * target date is shown in `zone`.
  */
 export function formatRelative(
-  date: string | Date,
-  relativeTo: string | Date = new Date(),
-  zone: string
+  date: DateInput,
+  zone: string,
+  relativeTo: DateInput = new Date()
 ): string {
   const targetDate = normalizeToDate(date)
-  const baseDate = normalizeToDate(relativeTo)
-  const diffMs = targetDate.getTime() - baseDate.getTime()
+  const diffMs = targetDate.getTime() - normalizeToDate(relativeTo).getTime()
   const isPast = diffMs < 0
-  const absDiffMs = Math.abs(diffMs)
 
-  // Convert to different units
-  const seconds = Math.floor(absDiffMs / 1000)
+  const seconds = Math.floor(Math.abs(diffMs) / 1000)
   const minutes = Math.floor(seconds / 60)
   const hours = Math.floor(minutes / 60)
   const days = Math.floor(hours / 24)
 
-  let timeStr: string
+  let value: number
   let unit: string
-
   if (seconds < 60) {
-    timeStr = seconds.toString()
-    unit = seconds === 1 ? 'second' : 'seconds'
+    value = seconds
+    unit = 'second'
   } else if (minutes < 60) {
-    timeStr = minutes.toString()
-    unit = minutes === 1 ? 'minute' : 'minutes'
+    value = minutes
+    unit = 'minute'
   } else if (hours < 24) {
-    timeStr = hours.toString()
-    unit = hours === 1 ? 'hour' : 'hours'
+    value = hours
+    unit = 'hour'
   } else if (days < 7) {
-    timeStr = days.toString()
-    unit = days === 1 ? 'day' : 'days'
+    value = days
+    unit = 'day'
   } else {
-    // For longer periods, show the actual date
     return format(targetDate, zone, FORMAT_PATTERNS.dateOnly)
   }
 
-  return isPast ? `${timeStr} ${unit} ago` : `in ${timeStr} ${unit}`
+  const text = `${value} ${unit}${value === 1 ? '' : 's'}`
+  return isPast ? `${text} ago` : `in ${text}`
 }
 
 /**
- * Format timezone offset as a string
+ * Format timezone offset in minutes as ±HH:mm
  */
 export function formatOffset(offsetMinutes: number): string {
-  const sign = offsetMinutes >= 0 ? '+' : '-'
-  const absMinutes = Math.abs(offsetMinutes)
-  const hours = Math.floor(absMinutes / 60)
-  const minutes = absMinutes % 60
-
-  return `${sign}${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
+  return formatOffsetToken(Math.round(offsetMinutes * 60), 'x', 3)
 }
 
 /**
@@ -277,8 +512,7 @@ export function formatOffset(offsetMinutes: number): string {
  */
 export function isValidFormatPattern(pattern: string): boolean {
   try {
-    // Try to format a test date with the pattern
-    format(new Date(), 'UTC', pattern)
+    tokenize(pattern)
     return true
   } catch {
     return false

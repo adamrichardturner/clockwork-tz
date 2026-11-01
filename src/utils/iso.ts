@@ -1,19 +1,26 @@
 /**
- * ISO 8601 date parsing and validation utilities
+ * ISO 8601 date parsing and validation utilities.
+ *
+ * Nothing in this module depends on the host timezone: wall-clock times are
+ * represented as "wall milliseconds", i.e. the epoch value the wall time would
+ * have if it were UTC.
  */
 
-/**
- * Strict ISO 8601 date pattern with optional timezone
- * Matches: YYYY-MM-DDTHH:mm:ss.sssZ or YYYY-MM-DDTHH:mm:ss.sss±HH:mm
- */
-const ISO_DATE_PATTERN =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?(?:Z|([+-])(\d{2}):(\d{2}))$/
+import type { DateInput } from '../data/types.js'
+
+const DATE_TIME = String.raw`(-?\d{4,6})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?`
 
 /**
- * Local ISO pattern without timezone info
- * Matches: YYYY-MM-DDTHH:mm:ss.sss or YYYY-MM-DD HH:mm:ss.sss
+ * ISO 8601 date-time with a UTC designator or numeric offset.
+ * Matches: YYYY-MM-DDTHH:mm[:ss[.fff]](Z|±HH[:mm[:ss]]|±HHmm[ss])
  */
-const LOCAL_ISO_PATTERN = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?$/
+const ISO_DATE_PATTERN = new RegExp(`^${DATE_TIME}(Z|z|[+-]\\d{2}(?::?\\d{2}(?::?\\d{2})?)?)$`)
+
+/**
+ * Local ISO date-time without timezone info.
+ * Matches: YYYY-MM-DDTHH:mm[:ss[.fff]] or YYYY-MM-DD HH:mm[:ss[.fff]]
+ */
+const LOCAL_ISO_PATTERN = new RegExp(`^${DATE_TIME}$`)
 
 /**
  * Date component structure
@@ -28,32 +35,68 @@ export interface DateComponents {
   millisecond: number
 }
 
-/**
- * Validate and parse an ISO 8601 date string
- */
-export function parseISODate(isoString: string): Date {
-  if (!isValidISOString(isoString)) {
-    throw new Error(`Invalid ISO date string: ${isoString}`)
+function matchToComponents(match: RegExpExecArray): DateComponents {
+  const [, year, month, day, hour, minute, second = '0', fraction = '0'] = match
+  return {
+    year: parseInt(year!, 10),
+    month: parseInt(month!, 10),
+    day: parseInt(day!, 10),
+    hour: parseInt(hour!, 10),
+    minute: parseInt(minute!, 10),
+    second: parseInt(second, 10),
+    millisecond: parseInt(fraction.padEnd(3, '0').slice(0, 3), 10),
   }
-
-  const date = new Date(isoString)
-
-  if (isNaN(date.getTime())) {
-    throw new Error(`Unable to parse ISO date string: ${isoString}`)
-  }
-
-  return date
 }
 
 /**
- * Validate an ISO 8601 date string format
+ * Parse a numeric UTC offset ("Z", "+05:45", "-0330", "+00:19:32") into seconds
+ */
+export function parseOffsetSeconds(offset: string): number {
+  if (offset === 'Z' || offset === 'z') {
+    return 0
+  }
+  const match = /^([+-])(\d{2})(?::?(\d{2})(?::?(\d{2}))?)?$/.exec(offset)
+  if (!match) {
+    throw new Error(`Invalid UTC offset: ${offset}`)
+  }
+  const [, sign, h, m = '0', s = '0'] = match
+  const hours = parseInt(h!, 10)
+  const minutes = parseInt(m, 10)
+  const seconds = parseInt(s, 10)
+  if (hours > 23 || minutes > 59 || seconds > 59) {
+    throw new Error(`Invalid UTC offset: ${offset}`)
+  }
+  const total = hours * 3600 + minutes * 60 + seconds
+  return sign === '-' ? -total : total
+}
+
+/**
+ * Validate and parse an ISO 8601 date string that carries an offset
+ */
+export function parseISODate(isoString: string): Date {
+  const match = typeof isoString === 'string' ? ISO_DATE_PATTERN.exec(isoString.trim()) : null
+  if (!match) {
+    throw new Error(`Invalid ISO date string: ${isoString}`)
+  }
+
+  const components = matchToComponents(match)
+  if (!validateDateComponents(components)) {
+    throw new Error(`Invalid date components in ISO string: ${isoString}`)
+  }
+
+  const offsetSeconds = parseOffsetSeconds(match[8]!)
+  return new Date(componentsToWallMs(components) - offsetSeconds * 1000)
+}
+
+/**
+ * Validate an ISO 8601 date string format (with offset)
  */
 export function isValidISOString(isoString: string): boolean {
   if (typeof isoString !== 'string') {
     return false
   }
-
-  return ISO_DATE_PATTERN.test(isoString)
+  const match = ISO_DATE_PATTERN.exec(isoString.trim())
+  return match !== null && validateDateComponents(matchToComponents(match))
 }
 
 /**
@@ -63,49 +106,57 @@ export function isValidLocalISOString(localString: string): boolean {
   if (typeof localString !== 'string') {
     return false
   }
-
-  return LOCAL_ISO_PATTERN.test(localString)
+  const match = LOCAL_ISO_PATTERN.exec(localString.trim())
+  return match !== null && validateDateComponents(matchToComponents(match))
 }
 
 /**
  * Parse a local ISO string into date components
  */
 export function parseLocalISOString(localString: string): DateComponents {
-  if (!isValidLocalISOString(localString)) {
+  const match = typeof localString === 'string' ? LOCAL_ISO_PATTERN.exec(localString.trim()) : null
+  if (!match) {
     throw new Error(`Invalid local ISO string: ${localString}`)
   }
-
-  const match = LOCAL_ISO_PATTERN.exec(localString)
-  if (!match) {
-    throw new Error(`Failed to parse local ISO string: ${localString}`)
+  const components = matchToComponents(match)
+  if (!validateDateComponents(components)) {
+    throw new Error(`Invalid date components in local ISO string: ${localString}`)
   }
+  return components
+}
 
-  const [, yearStr, monthStr, dayStr, hourStr, minuteStr, secondStr, msStr] = match
+/**
+ * Convert date components to wall milliseconds (the components read as UTC)
+ */
+export function componentsToWallMs(c: DateComponents): number {
+  const date = new Date(0)
+  date.setUTCFullYear(c.year, c.month - 1, c.day)
+  date.setUTCHours(c.hour, c.minute, c.second, c.millisecond)
+  return date.getTime()
+}
 
+/**
+ * Convert wall milliseconds back into date components
+ */
+export function wallMsToComponents(wallMs: number): DateComponents {
+  const d = new Date(wallMs)
   return {
-    year: parseInt(yearStr!, 10),
-    month: parseInt(monthStr!, 10),
-    day: parseInt(dayStr!, 10),
-    hour: parseInt(hourStr!, 10),
-    minute: parseInt(minuteStr!, 10),
-    second: parseInt(secondStr!, 10),
-    millisecond: msStr ? parseInt(msStr, 10) : 0,
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+    hour: d.getUTCHours(),
+    minute: d.getUTCMinutes(),
+    second: d.getUTCSeconds(),
+    millisecond: d.getUTCMilliseconds(),
   }
 }
 
 /**
- * Convert date components to a Date object (assumes local timezone)
+ * Convert date components to a Date whose UTC fields equal the components.
+ * Independent of the host timezone.
  */
 export function componentsToDate(components: DateComponents): Date {
-  return new Date(
-    components.year,
-    components.month - 1, // JS months are 0-based
-    components.day,
-    components.hour,
-    components.minute,
-    components.second,
-    components.millisecond
-  )
+  return new Date(componentsToWallMs(components))
 }
 
 /**
@@ -116,33 +167,38 @@ export function formatAsUTC(date: Date): string {
 }
 
 /**
- * Format a Date as local ISO string (without timezone info)
+ * Format components as a local ISO string (without timezone info)
  */
-export function formatAsLocalISO(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const hour = String(date.getHours()).padStart(2, '0')
-  const minute = String(date.getMinutes()).padStart(2, '0')
-  const second = String(date.getSeconds()).padStart(2, '0')
-  const ms = String(date.getMilliseconds()).padStart(3, '0')
-
-  return `${year}-${month}-${day}T${hour}:${minute}:${second}.${ms}`
+export function formatComponentsAsLocalISO(c: DateComponents): string {
+  const pad = (n: number, len = 2) => String(n).padStart(len, '0')
+  const year =
+    c.year < 0 ? `-${pad(-c.year, 6)}` : c.year > 9999 ? `+${pad(c.year, 6)}` : pad(c.year, 4)
+  return `${year}-${pad(c.month)}-${pad(c.day)}T${pad(c.hour)}:${pad(c.minute)}:${pad(c.second)}.${pad(c.millisecond, 3)}`
 }
 
 /**
- * Normalize input to a Date object
+ * Normalize input to a Date object. Strings must carry an offset or `Z`.
  */
-export function normalizeToDate(input: string | Date): Date {
+export function normalizeToDate(input: DateInput): Date {
   if (input instanceof Date) {
+    if (isNaN(input.getTime())) {
+      throw new Error('Invalid Date')
+    }
     return input
+  }
+
+  if (typeof input === 'number') {
+    if (!Number.isFinite(input)) {
+      throw new Error(`Invalid epoch milliseconds: ${input}`)
+    }
+    return new Date(input)
   }
 
   if (typeof input === 'string') {
     return parseISODate(input)
   }
 
-  throw new Error(`Invalid date input: ${input}`)
+  throw new Error(`Invalid date input: ${String(input)}`)
 }
 
 /**
@@ -171,28 +227,27 @@ export function getDaysInMonth(year: number, month: number): number {
 export function validateDateComponents(components: DateComponents): boolean {
   const { year, month, day, hour, minute, second, millisecond } = components
 
-  // Basic range checks
-  if (year < 1970 || year > 3000) return false
-  if (month < 1 || month > 12) return false
-  if (day < 1 || day > getDaysInMonth(year, month)) return false
-  if (hour < 0 || hour > 23) return false
-  if (minute < 0 || minute > 59) return false
-  if (second < 0 || second > 59) return false
-  if (millisecond < 0 || millisecond > 999) return false
+  if (!Number.isInteger(year)) {
+    return false
+  }
+  if (month < 1 || month > 12) {
+    return false
+  }
+  if (day < 1 || day > getDaysInMonth(year, month)) {
+    return false
+  }
+  if (hour < 0 || hour > 23) {
+    return false
+  }
+  if (minute < 0 || minute > 59) {
+    return false
+  }
+  if (second < 0 || second > 59) {
+    return false
+  }
+  if (millisecond < 0 || millisecond > 999) {
+    return false
+  }
 
   return true
-}
-
-/**
- * Add milliseconds to a Date
- */
-export function addMilliseconds(date: Date, ms: number): Date {
-  return new Date(date.getTime() + ms)
-}
-
-/**
- * Get the difference between two dates in milliseconds
- */
-export function diffInMilliseconds(date1: Date, date2: Date): number {
-  return date1.getTime() - date2.getTime()
 }
