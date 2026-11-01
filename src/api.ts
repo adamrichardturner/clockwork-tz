@@ -29,7 +29,7 @@ import { normalizeToDate } from './utils/iso.js'
  */
 let currentEngine: TzEngine = createSystemIntlEngine()
 let initOptions: ClockworkOptions = {}
-let updateListeners: Set<(version: string) => void> = new Set()
+const updateListeners: Set<(version: string) => void> = new Set()
 
 /**
  * Initialize clockwork-tz with options

@@ -15,8 +15,6 @@ import {
   getCurrentEngine,
   isSystemIntlEngine,
   isTimezoneWellSupported,
-  isDSTDetectionReliable,
-  expectOffsetToBe,
 } from './utils/testHelpers.js'
 
 describe('Timezone Conversions', () => {
@@ -180,7 +178,7 @@ describe('Timezone Conversions', () => {
       expect(result.source).toBe('system-intl')
 
       // Verify the conversion is correct
-      const lordHowe = fromUTC(utcTime, 'Australia/Lord_Howe')
+
       const chatham = fromUTC(utcTime, 'Pacific/Chatham')
 
       expect(result.offsetMinutes).toBe(chatham.offsetMinutes)

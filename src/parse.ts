@@ -50,7 +50,9 @@ export function parse(input: string, options: ParseOptions = {}): ParseResult {
 
   if (typeof input !== 'string' || input.trim() === '') {
     const error = new Error('Input must be a non-empty string')
-    if (strict) throw error
+    if (strict) {
+      throw error
+    }
 
     return {
       date: new Date(NaN),
@@ -73,7 +75,9 @@ export function parse(input: string, options: ParseOptions = {}): ParseResult {
         isValid: !isNaN(date.getTime()),
       }
     } catch (error) {
-      if (strict) throw new Error(`Failed to parse ISO date: ${error}`)
+      if (strict) {
+        throw new Error(`Failed to parse ISO date: ${error}`)
+      }
     }
   }
 
@@ -89,7 +93,9 @@ export function parse(input: string, options: ParseOptions = {}): ParseResult {
         isValid: !isNaN(date.getTime()) && validateDateComponents(components),
       }
     } catch (error) {
-      if (strict) throw new Error(`Failed to parse local ISO date: ${error}`)
+      if (strict) {
+        throw new Error(`Failed to parse local ISO date: ${error}`)
+      }
     }
   }
 
@@ -107,7 +113,9 @@ export function parse(input: string, options: ParseOptions = {}): ParseResult {
           isValid: !isNaN(date.getTime()) && validateDateComponents(components),
         }
       } catch (error) {
-        if (strict) throw new Error(`Failed to parse flexible date: ${error}`)
+        if (strict) {
+          throw new Error(`Failed to parse flexible date: ${error}`)
+        }
       }
     }
   }

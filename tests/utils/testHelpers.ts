@@ -92,7 +92,7 @@ export function getExpectedOffset(timezone: string, date: Date, idealOffset: num
 /**
  * Check if DST detection is reliable for a timezone
  */
-export function isDSTDetectionReliable(timezone: string): boolean {
+export function isDSTDetectionReliable(_timezone: string): boolean {
   if (isEmbeddedTzdbEngine()) {
     return true
   }

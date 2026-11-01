@@ -172,13 +172,27 @@ export function validateDateComponents(components: DateComponents): boolean {
   const { year, month, day, hour, minute, second, millisecond } = components
 
   // Basic range checks
-  if (year < 1970 || year > 3000) return false
-  if (month < 1 || month > 12) return false
-  if (day < 1 || day > getDaysInMonth(year, month)) return false
-  if (hour < 0 || hour > 23) return false
-  if (minute < 0 || minute > 59) return false
-  if (second < 0 || second > 59) return false
-  if (millisecond < 0 || millisecond > 999) return false
+  if (year < 1970 || year > 3000) {
+    return false
+  }
+  if (month < 1 || month > 12) {
+    return false
+  }
+  if (day < 1 || day > getDaysInMonth(year, month)) {
+    return false
+  }
+  if (hour < 0 || hour > 23) {
+    return false
+  }
+  if (minute < 0 || minute > 59) {
+    return false
+  }
+  if (second < 0 || second > 59) {
+    return false
+  }
+  if (millisecond < 0 || millisecond > 999) {
+    return false
+  }
 
   return true
 }

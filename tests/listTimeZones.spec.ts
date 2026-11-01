@@ -3,17 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import {
-  initClockworkTZ,
-  listTimeZones,
-  type TimeZoneItem,
-  type ListOptions,
-} from '../src/index.js'
-import {
-  getCurrentEngine,
-  isSystemIntlEngine,
-  isTimezoneWellSupported,
-} from './utils/testHelpers.js'
+import { initClockworkTZ, listTimeZones, type ListOptions } from '../src/index.js'
+import { isSystemIntlEngine } from './utils/testHelpers.js'
 
 describe('Timezone Listing', () => {
   beforeEach(() => {
@@ -160,7 +151,6 @@ describe('Timezone Listing', () => {
       }
 
       const zones = listTimeZones()
-      const now = new Date()
 
       // Test some specific zones with known offset ranges - exact for embedded-tzdb
       const testCases = [
@@ -204,7 +194,6 @@ describe('Timezone Listing', () => {
       }
 
       const zones = listTimeZones()
-      const now = new Date()
       const isNorthernSummer = now.getUTCMonth() >= 5 && now.getUTCMonth() <= 8 // June-September
 
       // Check Lord Howe Island (Southern Hemisphere) - exact for embedded-tzdb

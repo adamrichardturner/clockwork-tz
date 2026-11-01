@@ -43,7 +43,9 @@ export function watchZoneTransitions(
   let currentTimeoutId: ReturnType<typeof setTimeout> | null = null
 
   const scheduleNextCheck = () => {
-    if (!isActive) return
+    if (!isActive) {
+      return
+    }
 
     const now = new Date()
     const nextTransition = findNextTransition(now, zone, engine)
@@ -55,7 +57,9 @@ export function watchZoneTransitions(
       const callbackDelay = Math.max(0, msUntilTransition + 1000) // +1 second buffer
 
       currentTimeoutId = setTimeout(() => {
-        if (!isActive) return
+        if (!isActive) {
+          return
+        }
 
         callback(nextTransition)
         scheduleNextCheck() // Schedule next transition
@@ -92,7 +96,7 @@ function findNextTransition(from: Date, zone: string, engine: TzEngine): Date | 
     const searchStart = new Date(from.getTime())
 
     // Search forward in weekly increments to find offset change
-    let searchDate = new Date(searchStart.getTime())
+    const searchDate = new Date(searchStart.getTime())
     const maxSearchWeeks = 104 // Search up to 2 years ahead
 
     for (let week = 0; week < maxSearchWeeks; week++) {
@@ -262,7 +266,7 @@ export function getPreviousTransition(
     const searchStart = new Date(from.getTime())
 
     // Search backward in weekly increments to find offset change
-    let searchDate = new Date(searchStart.getTime())
+    const searchDate = new Date(searchStart.getTime())
     const maxSearchWeeks = 104 // Search up to 2 years back
 
     for (let week = 1; week <= maxSearchWeeks; week++) {

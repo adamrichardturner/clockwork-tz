@@ -9,8 +9,6 @@ import {
   isSystemIntlEngine,
   isTimezoneWellSupported,
   isDSTDetectionReliable,
-  expectOffsetToBe,
-  testWithEngine,
 } from './utils/testHelpers.js'
 
 describe('Timezone Offsets and DST Detection', () => {
@@ -63,8 +61,6 @@ describe('Timezone Offsets and DST Detection', () => {
     const testDate = new Date('2024-06-15T12:00:00Z')
 
     it('should handle fractional hour offsets correctly', () => {
-      const engine = getCurrentEngine()
-
       if (isSystemIntlEngine()) {
         console.log(
           'Skipping exact fractional offset tests - system-intl has known calculation issues'
