@@ -10,10 +10,10 @@ Timezone conversions that get the weird zones right. clockwork-tz handles half-h
 and it resolves local times inside DST gaps and overlaps exactly the way
 [Temporal](https://tc39.es/proposal-temporal/docs/) does.
 
-- **Zero runtime dependencies.** The core uses the platform's `Intl` API (about 19 kB gzipped).
+- **Zero runtime dependencies.** The core uses the platform's `Intl` API (about 21 kB gzipped, about 11 kB minified when you import only `fromUTC`).
 - **Host independent.** Results never depend on the timezone of the machine running the code.
 - **Two engines.** `system-intl` uses the OS/browser timezone data. `embedded-tzdb` uses a
-  pinned IANA tzdb release (28 kB gzipped) for identical results everywhere, with optional
+  pinned IANA tzdb release (30 kB gzipped) for identical results everywhere, with optional
   signed updates.
 - **ESM + CommonJS** with complete TypeScript types.
 
