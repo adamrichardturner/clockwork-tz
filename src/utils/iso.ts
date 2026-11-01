@@ -7,6 +7,7 @@
  */
 
 import type { DateInput } from '../data/types.js'
+import { TimezoneError } from '../data/types.js'
 
 const DATE_TIME = String.raw`(-?\d{4,6})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?`
 
@@ -57,14 +58,14 @@ export function parseOffsetSeconds(offset: string): number {
   }
   const match = /^([+-])(\d{2})(?::?(\d{2})(?::?(\d{2}))?)?$/.exec(offset)
   if (!match) {
-    throw new Error(`Invalid UTC offset: ${offset}`)
+    throw new TimezoneError(`Invalid UTC offset: ${offset}`)
   }
   const [, sign, h, m = '0', s = '0'] = match
   const hours = parseInt(h!, 10)
   const minutes = parseInt(m, 10)
   const seconds = parseInt(s, 10)
   if (hours > 23 || minutes > 59 || seconds > 59) {
-    throw new Error(`Invalid UTC offset: ${offset}`)
+    throw new TimezoneError(`Invalid UTC offset: ${offset}`)
   }
   const total = hours * 3600 + minutes * 60 + seconds
   return sign === '-' ? -total : total
@@ -76,12 +77,12 @@ export function parseOffsetSeconds(offset: string): number {
 export function parseISODate(isoString: string): Date {
   const match = typeof isoString === 'string' ? ISO_DATE_PATTERN.exec(isoString.trim()) : null
   if (!match) {
-    throw new Error(`Invalid ISO date string: ${isoString}`)
+    throw new TimezoneError(`Invalid ISO date string: ${isoString}`)
   }
 
   const components = matchToComponents(match)
   if (!validateDateComponents(components)) {
-    throw new Error(`Invalid date components in ISO string: ${isoString}`)
+    throw new TimezoneError(`Invalid date components in ISO string: ${isoString}`)
   }
 
   const offsetSeconds = parseOffsetSeconds(match[8]!)
@@ -116,11 +117,11 @@ export function isValidLocalISOString(localString: string): boolean {
 export function parseLocalISOString(localString: string): DateComponents {
   const match = typeof localString === 'string' ? LOCAL_ISO_PATTERN.exec(localString.trim()) : null
   if (!match) {
-    throw new Error(`Invalid local ISO string: ${localString}`)
+    throw new TimezoneError(`Invalid local ISO string: ${localString}`)
   }
   const components = matchToComponents(match)
   if (!validateDateComponents(components)) {
-    throw new Error(`Invalid date components in local ISO string: ${localString}`)
+    throw new TimezoneError(`Invalid date components in local ISO string: ${localString}`)
   }
   return components
 }
@@ -182,14 +183,14 @@ export function formatComponentsAsLocalISO(c: DateComponents): string {
 export function normalizeToDate(input: DateInput): Date {
   if (input instanceof Date) {
     if (isNaN(input.getTime())) {
-      throw new Error('Invalid Date')
+      throw new TimezoneError('Invalid Date')
     }
     return input
   }
 
   if (typeof input === 'number') {
     if (!Number.isFinite(input)) {
-      throw new Error(`Invalid epoch milliseconds: ${input}`)
+      throw new TimezoneError(`Invalid epoch milliseconds: ${input}`)
     }
     return new Date(input)
   }
@@ -198,7 +199,7 @@ export function normalizeToDate(input: DateInput): Date {
     return parseISODate(input)
   }
 
-  throw new Error(`Invalid date input: ${String(input)}`)
+  throw new TimezoneError(`Invalid date input: ${String(input)}`)
 }
 
 /**

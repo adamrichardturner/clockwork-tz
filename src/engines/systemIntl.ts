@@ -100,6 +100,12 @@ function toIana(zone: string): string {
   return CLDR_TO_IANA[zone] ?? zone
 }
 
+/** ISO 3166-1 alpha-2 region codes, used to ask Intl which zones each region uses */
+const REGION_CODES =
+  'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'
+
+const MAX_CACHED_ZONES = 1024
+
 /**
  * System Intl timezone engine using platform APIs
  */
@@ -110,6 +116,7 @@ export class SystemIntlEngine implements TzEngine {
   private readonly abbrevFormatters = new Map<string, Intl.DateTimeFormat>()
   private readonly validity = new Map<string, boolean>()
   private readonly standardOffsets = new Map<string, number>()
+  private countries: Map<string, string[]> | null = null
 
   getVersion(): string | undefined {
     return undefined
@@ -126,6 +133,9 @@ export class SystemIntlEngine implements TzEngine {
         valid = true
       } catch {
         valid = false
+      }
+      if (this.validity.size >= MAX_CACHED_ZONES) {
+        this.validity.clear()
       }
       this.validity.set(zone, valid)
     }
@@ -152,6 +162,35 @@ export class SystemIntlEngine implements TzEngine {
     return [...FALLBACK_ZONES]
   }
 
+  /**
+   * ISO country codes using a zone, from Intl.Locale#getTimeZones where the
+   * runtime supports it (empty otherwise)
+   */
+  getCountryCodes(zone: string): string[] {
+    this.assertValid(zone)
+    if (!this.countries) {
+      const countries = new Map<string, string[]>()
+      for (const region of REGION_CODES.split(' ')) {
+        let zones: string[] = []
+        try {
+          const locale = new Intl.Locale(`und-${region}`) as Intl.Locale & {
+            getTimeZones?: () => string[] | undefined
+            timeZones?: string[]
+          }
+          zones = locale.getTimeZones?.() ?? locale.timeZones ?? []
+        } catch {
+          // Region unknown to this runtime
+        }
+        for (const id of zones) {
+          const key = toIana(id)
+          countries.set(key, [...(countries.get(key) ?? []), region])
+        }
+      }
+      this.countries = countries
+    }
+    return [...(this.countries.get(this.canonicalize(zone)) ?? [])]
+  }
+
   getZoneInfo(epochMs: number, zone: string): ZoneInfo {
     this.assertValid(zone)
     const offsetSeconds = this.offsetSeconds(epochMs, zone)
@@ -174,6 +213,9 @@ export class SystemIntlEngine implements TzEngine {
   private offsetSeconds(epochMs: number, zone: string): number {
     let formatter = this.wallFormatters.get(zone)
     if (!formatter) {
+      if (this.wallFormatters.size >= MAX_CACHED_ZONES) {
+        this.wallFormatters.clear()
+      }
       formatter = new Intl.DateTimeFormat('en-US', {
         timeZone: zone,
         hourCycle: 'h23',
@@ -239,6 +281,9 @@ export class SystemIntlEngine implements TzEngine {
   private abbreviation(epochMs: number, zone: string): string {
     let formatter = this.abbrevFormatters.get(zone)
     if (!formatter) {
+      if (this.abbrevFormatters.size >= MAX_CACHED_ZONES) {
+        this.abbrevFormatters.clear()
+      }
       formatter = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' })
       this.abbrevFormatters.set(zone, formatter)
     }

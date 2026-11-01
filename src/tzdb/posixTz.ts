@@ -6,6 +6,7 @@
  */
 
 import type { ZoneInfo } from '../data/types.js'
+import { TimezoneError } from '../data/types.js'
 
 type DateRule =
   | { kind: 'julian'; day: number } // Jn: 1..365, Feb 29 never counted
@@ -42,7 +43,7 @@ class Reader {
   }
 
   fail(message: string): never {
-    throw new Error(`Invalid POSIX TZ "${this.text}": ${message} at ${this.pos}`)
+    throw new TimezoneError(`Invalid POSIX TZ "${this.text}": ${message} at ${this.pos}`)
   }
 
   name(): string {

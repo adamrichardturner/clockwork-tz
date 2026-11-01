@@ -351,7 +351,7 @@ export function formatWithPattern(
 ): string {
   const pattern = FORMAT_PATTERNS[patternName]
   if (!pattern) {
-    throw new Error(`Unknown format pattern: ${patternName}`)
+    throw new TimezoneError(`Unknown format pattern: ${patternName}`)
   }
 
   return format(input, zone, pattern)

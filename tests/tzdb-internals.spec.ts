@@ -62,6 +62,13 @@ describe('POSIX TZ footers', () => {
     expect(() => parsePosixTz('<EST5')).toThrow()
   })
 
+  it('ships country metadata for listed zones', () => {
+    expect(tzdb.countries?.['Asia/Kathmandu']).toEqual(['NP'])
+    for (const zone of tzdb.listed.filter(z => z !== 'UTC')) {
+      expect(tzdb.countries?.[zone], zone).toBeDefined()
+    }
+  })
+
   it('parses every footer in the bundled data', () => {
     for (const [zone, data] of Object.entries(tzdb.zones)) {
       expect(() => parsePosixTz(data.f), zone).not.toThrow()

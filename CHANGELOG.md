@@ -24,5 +24,13 @@ First release.
 - Transition lookup (`getNextTransition`, `getPreviousTransition`, `getTransitions`),
   transition watchers and `onTick`.
 - Strict ISO 8601 parsing, including offsets with seconds.
+- `interpretLocal` accepts wall time as fields (`{ year, month, day, hour?, … }`).
+- Country metadata: `getZoneCountries`, `countryCodes` on `listTimeZones` items, and a
+  `country` filter.
+- Cross-tab updates: data verified in one tab is loaded by the others.
+- `onTick` fires on wall-clock boundaries.
+- Every error is a `TimezoneError`.
+- The tzdb build verifies IANA's signatures on its downloads, and CI checks the committed
+  data rebuilds byte for byte.
 
 [1.0.0]: https://github.com/adamrichardturner/clockwork-tz/commits/main

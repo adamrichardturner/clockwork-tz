@@ -30,6 +30,7 @@ export interface CacheStorage {
   get: (key: string) => Promise<string | null>
   set: (key: string, value: string) => Promise<void>
   delete: (key: string) => Promise<void>
+  keys: () => Promise<string[]>
 }
 
 const localStorageCache: CacheStorage = {
@@ -54,6 +55,13 @@ const localStorageCache: CacheStorage = {
       // Ignore errors
     }
   },
+  async keys() {
+    try {
+      return Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? '')
+    } catch {
+      return []
+    }
+  },
 }
 
 const memory = new Map<string, string>()
@@ -67,6 +75,9 @@ const memoryCache: CacheStorage = {
   },
   async delete(key) {
     memory.delete(key)
+  },
+  async keys() {
+    return [...memory.keys()]
   },
 }
 

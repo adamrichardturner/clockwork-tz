@@ -42,7 +42,7 @@ const activeWatchers = new Set<() => void>()
 const activeTickWatchers = new Set<{
   callback: (now: Date) => void
   interval: number
-  timeoutId: ReturnType<typeof setInterval>
+  timeoutId: ReturnType<typeof setTimeout> | undefined
 }>()
 
 function sameInfo(a: ZoneInfo, b: ZoneInfo): boolean {
@@ -270,33 +270,39 @@ export function watchZoneTransitions(
 }
 
 /**
- * Call `callback` immediately and then every `granularityMs` (minimum 100ms),
- * useful for updating clocks.
+ * Call `callback` immediately and then on every multiple of `granularityMs`
+ * of wall-clock time (minimum 100ms), so a 1000ms clock ticks exactly on each
+ * second instead of drifting.
  */
 export function onTick(callback: (now: Date) => void, granularityMs: number = 1000): () => void {
-  if (granularityMs < 100) {
-    console.warn('Tick granularity less than 100ms may impact performance')
+  if (!Number.isFinite(granularityMs) || granularityMs < 100) {
+    console.warn('Tick granularity below 100ms is clamped to 100ms')
     granularityMs = 100
   }
-
-  const tick = () => {
-    callback(new Date())
-  }
-
-  tick()
-
-  const intervalId = setInterval(tick, granularityMs)
 
   const watcher = {
     callback,
     interval: granularityMs,
-    timeoutId: intervalId,
+    timeoutId: undefined as ReturnType<typeof setTimeout> | undefined,
+  }
+
+  const schedule = () => {
+    const delay = granularityMs - (Date.now() % granularityMs)
+    watcher.timeoutId = setTimeout(() => {
+      if (!activeTickWatchers.has(watcher)) {
+        return
+      }
+      callback(new Date())
+      schedule()
+    }, delay)
   }
 
   activeTickWatchers.add(watcher)
+  callback(new Date())
+  schedule()
 
   return () => {
-    clearInterval(intervalId)
+    clearTimeout(watcher.timeoutId)
     activeTickWatchers.delete(watcher)
   }
 }
@@ -311,7 +317,7 @@ export function cleanupAllWatchers(): void {
   activeWatchers.clear()
 
   for (const watcher of activeTickWatchers) {
-    clearInterval(watcher.timeoutId)
+    clearTimeout(watcher.timeoutId)
   }
   activeTickWatchers.clear()
 }

@@ -80,6 +80,8 @@ export interface ListOptions {
   at?: DateInput
   /** Locale used for long timezone names (default: "en") */
   locale?: string
+  /** Only zones used in this ISO 3166 country, e.g. "AU" */
+  country?: string
 }
 
 /**
@@ -92,6 +94,8 @@ export interface TimeZoneItem {
   label: string
   /** Current offset from UTC in minutes */
   offsetMinutes: number
+  /** ISO 3166 codes of the countries using the zone (empty when unknown) */
+  countryCodes: string[]
 }
 
 /**
@@ -153,6 +157,9 @@ export interface TzEngine {
 
   /** Exact transitions in [fromMs, toMs), when the engine knows them */
   getTransitions?(zone: string, fromMs: number, toMs: number): Transition[]
+
+  /** ISO 3166 country codes of the countries using a zone, when the engine knows them */
+  getCountryCodes?(zone: string): string[]
 }
 
 /**
@@ -208,17 +215,8 @@ export interface Environment {
 }
 
 /**
- * Error thrown when a feature is not available for the current engine
- */
-export class NotImplementedError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'NotImplementedError'
-  }
-}
-
-/**
- * Error thrown for invalid timezone operations
+ * Base class for every error clockwork-tz throws: invalid zones, unparseable
+ * input, unsupported format tokens and invalid timezone data
  */
 export class TimezoneError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {

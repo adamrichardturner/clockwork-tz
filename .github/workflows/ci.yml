@@ -141,6 +141,25 @@ jobs:
         if: matrix.node-version == 24
         run: timeout 30 node examples/node.mjs
 
+  tzdb-reproducible:
+    name: tzdb data is reproducible and signed by IANA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - name: Rebuild the committed tzdb release with signature verification
+        env:
+          TZDB_REQUIRE_SIGNATURE: '1'
+        run: |
+          VERSION=$(node -p "require('./packages/clockwork-tz-data/tzdb.json').version")
+          node scripts/build-tzdb.ts "$VERSION"
+      - name: Generated data matches the committed data
+        run: git diff --exit-code -- src/tzdb/data.generated.ts packages/clockwork-tz-data/tzdb.json
+
   audit:
     name: Security audit
     runs-on: ubuntu-latest

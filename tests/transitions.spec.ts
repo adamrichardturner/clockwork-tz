@@ -109,13 +109,20 @@ describe.each(ENGINES)('$name engine: transitions', ({ init }) => {
     expect(seen).toEqual(['2024-11-03T06:00:00.000Z'])
   })
 
-  it('ticks immediately and on an interval', () => {
+  it('ticks immediately and then on wall-clock boundaries', () => {
     vi.useFakeTimers()
-    let ticks = 0
-    const stop = onTick(() => ticks++, 1000)
-    vi.advanceTimersByTime(3000)
+    vi.setSystemTime(new Date('2024-07-15T12:00:00.400Z'))
+    const ticks: string[] = []
+    const stop = onTick(now => ticks.push(now.toISOString()), 1000)
+    vi.advanceTimersByTime(2700)
     stop()
     vi.advanceTimersByTime(3000)
-    expect(ticks).toBe(4)
+    expect(ticks).toEqual([
+      '2024-07-15T12:00:00.400Z',
+      '2024-07-15T12:00:01.000Z',
+      '2024-07-15T12:00:02.000Z',
+      '2024-07-15T12:00:03.000Z',
+    ])
+    expect(getWatcherStats().tickWatchers).toBe(0)
   })
 })

@@ -53,6 +53,8 @@ jobs:
 
       - name: Build tzdb data
         if: steps.versions.outputs.changed == 'true'
+        env:
+          TZDB_REQUIRE_SIGNATURE: '1'
         run: node scripts/build-tzdb.ts "${{ steps.versions.outputs.latest }}"
 
       - name: Sign data and write manifest

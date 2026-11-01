@@ -1,8 +1,8 @@
 {
   "version": "2026f",
-  "releaseDate": "2026-11-01T06:26:53.186Z",
+  "releaseDate": "2026-11-01T06:57:21.666Z",
   "dataUrl": "https://cdn.jsdelivr.net/npm/clockwork-tz-data@1.2026.6/tzdb.json",
-  "sha256": "48f9fdd87dcd91cb83d973be1f954af857adf4a12e95d7e1c06527dc61a982d4",
-  "signature": "0HX4oFOJfm596DgCgwFgD/PPneHbJDDXqdyrpl/LGNn5q0xutnXilRZa7WnxF/3ww60hxc0GwKoib5QVl4PzCg==",
+  "sha256": "4ce4303530d44f85a22fc801f9289d91a358005523e678cf3bc6e7ffa5e7c29c",
+  "signature": "Txd4kbmGHdec9E/cCAIADYc7j48YYmO7X1VpVZk+VePCWfPCdvyIIyXzV/tjQ9K/I2oEohfIstN+8Uwk3fJ9Dg==",
   "keyId": "63afe89a3ee676d5"
 }

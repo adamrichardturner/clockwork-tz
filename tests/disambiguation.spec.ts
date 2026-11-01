@@ -124,6 +124,30 @@ describe.each(ENGINES)('$name engine: local time disambiguation', ({ init }) => 
     expect(interpretLocal('2024-07-15T09:00:00.123456', 'UTC').utc).toBe('2024-07-15T09:00:00.123Z')
   })
 
+  it('accepts wall time as fields', () => {
+    expect(
+      interpretLocal({ year: 2024, month: 11, day: 3, hour: 1, minute: 30 }, 'America/New_York', {
+        disambiguation: 'latest',
+      }).utc
+    ).toBe('2024-11-03T06:30:00.000Z')
+    expect(interpretLocal({ year: 2024, month: 7, day: 15 }, 'Asia/Kathmandu').utc).toBe(
+      '2024-07-14T18:15:00.000Z'
+    )
+    expect(() =>
+      interpretLocal({ year: 2024, month: 3, day: 10, hour: 2, minute: 30 }, 'America/New_York', {
+        disambiguation: 'reject',
+      })
+    ).toThrow(/2024-03-10T02:30:00\.000/)
+  })
+
+  it('rejects invalid wall time fields', () => {
+    expect(() => interpretLocal({ year: 2024, month: 2, day: 30 }, 'UTC')).toThrow(TimezoneError)
+    expect(() => interpretLocal({ year: 2024, month: 1, day: 1, hour: 1.5 }, 'UTC')).toThrow(
+      TimezoneError
+    )
+    expect(() => interpretLocal({} as never, 'UTC')).toThrow(TimezoneError)
+  })
+
   it('rejects malformed or impossible local times', () => {
     expect(() => interpretLocal('2024-02-30T10:00:00', 'UTC')).toThrow(TimezoneError)
     expect(() => interpretLocal('2024-07-15T10:00:00Z', 'UTC')).toThrow(TimezoneError)

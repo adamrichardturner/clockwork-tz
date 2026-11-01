@@ -14,6 +14,7 @@ const PORTABLE_SPECS = [
   'tests/parse.spec.ts',
   'tests/transitions.spec.ts',
   'tests/list.spec.ts',
+  'tests/countries.spec.ts',
 ]
 
 export default defineConfig({
