@@ -12,7 +12,8 @@
   "files": [
     "tzdb.json",
     "manifest.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "keywords": [
     "tzdb",

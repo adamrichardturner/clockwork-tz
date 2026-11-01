@@ -1,7 +1,35 @@
 {
   "name": "clockwork-tz",
-  "version": "1.0.0-alpha.1",
-  "description": "Accurate timezone conversions and DST handling with optional deterministic IANA tzdb support",
+  "version": "1.0.0-alpha.2",
+  "description": "Timezone conversions that get the weird zones right: exact DST disambiguation, half- and quarter-hour offsets, and an optional deterministic IANA tzdb engine. Zero dependencies.",
+  "keywords": [
+    "timezone",
+    "tz",
+    "datetime",
+    "dst",
+    "daylight-saving",
+    "iana",
+    "tzdb",
+    "date",
+    "time",
+    "intl",
+    "conversion",
+    "offset",
+    "temporal",
+    "disambiguation",
+    "zero-dependency",
+    "tzif"
+  ],
+  "homepage": "https://github.com/adamrichardturner/clockwork-tz#readme",
+  "bugs": {
+    "url": "https://github.com/adamrichardturner/clockwork-tz/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adamrichardturner/clockwork-tz.git"
+  },
+  "license": "MIT",
+  "author": "Adam Turner <hello@adamrichardturner.dev>",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -33,7 +61,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsdown",
@@ -46,35 +75,18 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test:run && npm run check:pkg",
-    "check:pkg": "publint && attw --pack .",
+    "check:pkg": "publint && attw --pack . --profile node16",
     "build:tzdb": "node scripts/build-tzdb.ts",
     "test:browser": "vitest run --project browser",
     "test:coverage": "vitest run --project node --coverage"
   },
-  "keywords": [
-    "timezone",
-    "tz",
-    "datetime",
-    "dst",
-    "daylight-saving",
-    "iana",
-    "tzdb",
-    "date",
-    "time",
-    "intl",
-    "conversion",
-    "offset"
-  ],
-  "author": "Adam Turner",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/adamrichardturner/clockwork-tz.git"
+  "engines": {
+    "node": ">=20"
   },
-  "bugs": {
-    "url": "https://github.com/adamrichardturner/clockwork-tz/issues"
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
-  "homepage": "https://github.com/adamrichardturner/clockwork-tz#readme",
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@types/node": "^26.6.6",
@@ -87,8 +99,5 @@
     "tsdown": "^0.23.4",
     "typescript": "~7.0.2",
     "vitest": "^5.0.5"
-  },
-  "engines": {
-    "node": ">=20"
   }
 }

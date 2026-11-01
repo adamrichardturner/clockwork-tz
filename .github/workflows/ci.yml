@@ -4,16 +4,41 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
+
+permissions:
+  contents: read
 
 jobs:
+  check:
+    name: Lint, typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run build
+      - run: npm run check:pkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+
   test:
-    name: Node ${{ matrix.node-version }}
+    name: Node ${{ matrix.node-version }}, TZ=${{ matrix.tz }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         node-version: [22, 24, 26]
+        tz: [UTC, America/New_York, Australia/Lord_Howe, Asia/Kathmandu, Pacific/Chatham]
+    env:
+      TZ: ${{ matrix.tz }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,8 +46,108 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run format:check
-      - run: npm run build
       - run: npm run test:run
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run test:coverage
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  browsers:
+    name: Browsers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:browser
+
+  package-smoke:
+    name: Packed package on Node ${{ matrix.node-version }}
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - run: npm pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install tarball into a fresh project
+        run: |
+          mkdir smoke && cd smoke
+          npm init -y > /dev/null
+          npm install ../clockwork-tz-*.tgz typescript@~7.0.2
+      - name: ESM import
+        working-directory: smoke
+        run: |
+          cat > esm.mjs <<'JS'
+          import { fromUTC, initClockworkTZ } from 'clockwork-tz'
+          import { tzdb } from 'clockwork-tz/tzdb'
+          await initClockworkTZ({ engine: 'embedded-tzdb', data: tzdb })
+          const r = fromUTC('2024-07-15T14:00:00Z', 'Asia/Kathmandu')
+          if (r.offsetMinutes !== 345) throw new Error(`unexpected ${r.offsetMinutes}`)
+          console.log('ESM ok', r.local, r.tzdbVersion)
+          JS
+          node esm.mjs
+      - name: CommonJS require
+        working-directory: smoke
+        run: |
+          cat > cjs.cjs <<'JS'
+          const { fromUTC } = require('clockwork-tz')
+          const { TZDB_VERSION } = require('clockwork-tz/tzdb')
+          const r = fromUTC('2024-07-15T14:00:00Z', 'Australia/Lord_Howe')
+          if (r.offsetMinutes !== 630) throw new Error(`unexpected ${r.offsetMinutes}`)
+          console.log('CJS ok', r.local, TZDB_VERSION)
+          JS
+          node cjs.cjs
+      - name: TypeScript (node16 resolution)
+        if: matrix.node-version == 24
+        working-directory: smoke
+        run: |
+          cat > types.mts <<'TS'
+          import { fromUTC, type ClockworkTime } from 'clockwork-tz'
+          import { tzdb, type TzdbData } from 'clockwork-tz/tzdb'
+          const t: ClockworkTime = fromUTC(0, 'UTC')
+          const d: TzdbData = tzdb
+          console.log(t.utc, d.version)
+          TS
+          npx tsc --noEmit --strict --module node16 --moduleResolution node16 types.mts
+      - name: Run Node example
+        if: matrix.node-version == 24
+        run: timeout 30 node examples/node.mjs
+
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: npm ci
+      - run: npm audit --audit-level=moderate
