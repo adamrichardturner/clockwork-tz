@@ -18,6 +18,16 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./tzdb": {
+      "import": {
+        "types": "./dist/tzdb.d.ts",
+        "default": "./dist/tzdb.js"
+      },
+      "require": {
+        "types": "./dist/tzdb.d.cts",
+        "default": "./dist/tzdb.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -30,13 +40,14 @@
     "dev": "tsdown --watch",
     "test": "vitest",
     "test:run": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.tools.json",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run build && npm run test:run && npm run check:pkg",
-    "check:pkg": "publint && attw --pack ."
+    "check:pkg": "publint && attw --pack .",
+    "build:tzdb": "node scripts/build-tzdb.ts"
   },
   "keywords": [
     "timezone",
